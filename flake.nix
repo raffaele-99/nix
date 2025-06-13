@@ -22,11 +22,9 @@
     {
       # macOS configuration
       darwinConfigurations."macbook" = nix-darwin.lib.darwinSystem {
-        system = "aarch64-darwin"; # or "x86_64-darwin" for Intel
+        system = "aarch64-darwin";
         modules = [
           ./common/system/nix-config.nix
-          ./hosts/macbook/system/configuration.nix
-          
           home-manager.darwinModules.home-manager
           {
             home-manager.useGlobalPkgs = true;
@@ -35,6 +33,7 @@
               imports = [./hosts/macbook/home/default.nix ];
             };
           }
+          ./hosts/macbook/system/configuration.nix
         ];
       };
       

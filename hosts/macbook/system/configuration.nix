@@ -4,6 +4,9 @@
     dock.autohide = false;
   };
   
+  ids.gids.nixbld = 350;
+
+
   homebrew = {
     enable = true;
     casks = [
@@ -34,7 +37,6 @@
   users.knownUsers = [ "luca" ];
   users.users.luca.uid = 501;
   users.users.luca.home = "/Users/luca";
-  users.users.luca.shell = pkgs.zsh;  
   
   system.primaryUser = "luca";
 

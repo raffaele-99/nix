@@ -5,10 +5,10 @@
     enableCompletion = true;
     
     # Source aliases and functions
-    initExtra = ''
+    initContent = ''
       # Source custom aliases and functions
-      source ${config.home.homeDirectory}/.config/zsh/aliases.sh
-      source ${config.home.homeDirectory}/.config/zsh/functions.sh
+      source ~/.config/zsh/aliases.sh
+      source ~/.config/zsh/functions.sh
     '';
   };
 }
