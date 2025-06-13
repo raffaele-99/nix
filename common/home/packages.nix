@@ -3,12 +3,10 @@
 {
   # Shared packages across both systems
   home.packages = with pkgs; [
-    # Core tools you specified
     ghostty
-    neovim
     go
-    
-    # Basic utilities
+    git
+    gh    
     curl
     wget
     jq
