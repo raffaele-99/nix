@@ -42,8 +42,8 @@
       nixosConfigurations."nixos" = nixpkgs.lib.nixosSystem {
         system = "aarch64-linux";
         modules = [
-          ./hosts/pentest-vm/system/hardware-configuration.nix
-          ./hosts/pentest-vm/system/configuration.nix
+          ./hosts/nixos/system/hardware-configuration.nix
+          ./hosts/nixos/system/configuration.nix
           
           home-manager.nixosModules.home-manager
           {
