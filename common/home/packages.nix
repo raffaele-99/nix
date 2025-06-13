@@ -6,7 +6,9 @@
     ghostty
     go
     git
-    gh    
+    # gh already enabled in common/home/default.nix
+    # zsh already enabled in common/home/zshrc.nix
+    # nvim already enabled in common/home/nvim.nix
     curl
     wget
     jq
