@@ -37,17 +37,17 @@
       };
       
       # NixOS VM configuration
-      nixosConfigurations."nixos-vm" = nixpkgs.lib.nixosSystem {
+      nixosConfigurations."nixos" = nixpkgs.lib.nixosSystem {
         system = "aarch64-linux";
         modules = [
-          ./hosts/nixos-vm/system/hardware-configuration.nix
-          ./hosts/nixos-vm/system/configuration.nix
+          ./hosts/nixos/system/hardware-configuration.nix
+          ./hosts/nixos/system/configuration.nix
           
           home-manager.nixosModules.home-manager
           {
             home-manager.useGlobalPkgs = true;
             home-manager.useUserPackages = true;
-            home-manager.users.${username} = import ./hosts/nixos-vm/home/default.nix;
+            home-manager.users.${username} = import ./hosts/nixos/home/default.nix;
           }
         ];
       };
