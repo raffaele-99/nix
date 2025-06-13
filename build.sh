@@ -6,5 +6,5 @@ if [[ $(uname) == "Darwin" ]]; then
     darwin-rebuild build --flake .#macbook
 else
     echo "Building NixOS configuration..."
-    nixos-rebuild build --flake .#nixos-vm
+    nixos-rebuild build --flake .#nixos
 fi
