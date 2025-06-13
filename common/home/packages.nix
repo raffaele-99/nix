@@ -3,7 +3,7 @@
 {
   # Shared packages across both systems
   home.packages = with pkgs; [
-    ghostty
+    # ghostty broken on mac
     go
     git
     # gh already enabled in common/home/default.nix

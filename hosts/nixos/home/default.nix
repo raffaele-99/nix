@@ -5,6 +5,7 @@
   ];
   
   home.packages = with pkgs; [
+    ghostty
     burpsuite
     nmap
     freerdp

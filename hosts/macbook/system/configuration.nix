@@ -17,9 +17,15 @@
       "visual-studio-code"
     ];
   };
+
+    # macOS user accounts
+  users.knownUsers = [ "luca" ];
+  users.users.luca.uid = 501;
+  users.users.luca.home = "/Users/luca";
+  users.users.luca.shell = pkgs.zsh;  
   
-  services.nix-daemon.enable = true;
-  
+  system.primaryUser = "luca";
+
   programs.zsh.enable = true;
   
   system.stateVersion = 4;
