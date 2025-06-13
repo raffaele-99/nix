@@ -1,26 +1,23 @@
-# common/home/git.nix
 { config, pkgs, ... }:
 {
   programs.git = {
     enable = true;
     
-    # We'll set up conditional includes for work/personal
     extraConfig = {
       init.defaultBranch = "main";
-      
-      # Personal account for ~/source/personal
+     
+      credential.helper = "!${pkgs.gh}/bin/gh auth git-credential";
+
       "includeIf \"gitdir:~/source/personal/\"" = {
         path = "~/.gitconfig-personal";
       };
       
-      # Work account for ~/source/work
       "includeIf \"gitdir:~/source/work/\"" = {
         path = "~/.gitconfig-work";
       };
     };
   };
   
-  # Create the conditional git configs
   home.file.".gitconfig-personal".text = ''
     [user]
       name = "luca"
