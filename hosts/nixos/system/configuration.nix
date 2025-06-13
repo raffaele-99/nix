@@ -20,8 +20,13 @@
   # Enable X11
   services.xserver = {
     enable = true;
-    displayManager.gdm.enable = true;
     desktopManager.gnome.enable = true;
+  };
+
+  # enable display manager
+  services.displayManager.gdm = {
+    enable = true;
+    wayland = true;
   };
   
   # User
