@@ -12,5 +12,6 @@
     curl
     wget
     jq
+    fzf
   ];
 }
