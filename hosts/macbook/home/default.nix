@@ -7,5 +7,6 @@
   # macOS specific packages
   home.packages = with pkgs; [
     # macOS-specific CLI tools
+    fzf
   ];
 }
