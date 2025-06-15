@@ -13,5 +13,6 @@
     wget
     jq
     fzf
+    _1password-cli
   ];
 }
