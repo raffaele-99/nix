@@ -5,6 +5,13 @@
     
     extraConfig = {
       init.defaultBranch = "main";
+      
+      # Configure gh as the credential helper with the correct syntax
+      credential = {
+        helper = [
+          "!${pkgs.gh}/bin/gh auth git-credential"
+        ];
+      };
      
       "includeIf \"gitdir:~/source/personal/\"" = {
         path = "~/.gitconfig-personal";

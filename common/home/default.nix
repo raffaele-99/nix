@@ -12,7 +12,7 @@
   programs.gh = {
     enable = true;
     gitCredentialHelper = {
-      enable = true;
+      enable = false; # this gets configured manually in git.nix
     };
   };
   
