@@ -12,11 +12,14 @@
       source ~/.config/zsh/functions.sh
 
       git_branch() {
-        git branch 2>/dev/null | sed -n 's/^\* //p'
+        local branch=$(git branch 2>/dev/null | sed -n 's/^\* //p')
+        if [[ -n "$branch" ]]; then
+          echo " $branch"
+        fi
       }
       
       setopt PROMPT_SUBST
-      export PS1='%{%F{2}%}%n %{%f%}at %{%F{33}%}%D %* %{%F{2}%}%~ %{%F{yellow}%}$(git_branch)%{%f%}$ '
+      export PS1='%{%F{2}%}%n %{%f%}at %{%F{4}%}%~%{%F{yellow}%}$(git_branch)%{%f%} $ '
       
       ZSH_AUTOSUGGEST_USE_ASYNC=true
     '';
