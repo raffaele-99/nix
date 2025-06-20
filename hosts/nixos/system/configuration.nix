@@ -20,7 +20,10 @@
   # Enable X11
   services.xserver = {
     enable = true;
-    desktopManager.gnome.enable = true;
+  };
+
+  services.desktopManager = {
+    gnome.enable = true;
   };
 
   # enable display manager
