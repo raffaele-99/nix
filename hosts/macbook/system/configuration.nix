@@ -18,6 +18,7 @@
       "docker"
       "visual-studio-code"
       "ghostty"
+      "burp-suite-professional"
     ];
     brews = [
       "glow"

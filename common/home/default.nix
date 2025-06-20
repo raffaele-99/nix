@@ -17,4 +17,12 @@
   };
   
   home.stateVersion = "24.05";
+
+  home.file = {
+      ".config/nixpkgs/config.nix".text = ''
+        { allowUnfree = true; }
+      '';
+
+      ".ssh/config".source = ./dotfiles/ssh/config;    
+  }
 }
