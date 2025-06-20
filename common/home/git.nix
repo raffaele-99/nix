@@ -5,13 +5,6 @@
     
     extraConfig = {
       init.defaultBranch = "main";
-      
-      # Configure gh as the credential helper with the correct syntax
-      credential = {
-        helper = [
-          "!${pkgs.gh}/bin/gh auth git-credential"
-        ];
-      };
      
       "includeIf \"gitdir:~/source/personal/\"" = {
         path = "~/.gitconfig-personal";
@@ -29,6 +22,8 @@
       email = "raffaele-99@users.noreply.github.com"
     [github]
       user = "raffaele-99"
+    [url "git@github.com-personal:"]
+      insteadOf = "git@github.com:"
   '';
   
   home.file.".gitconfig-work".text = ''
@@ -37,5 +32,7 @@
       email = "luca.fuda@tantosec.com"
     [github]
       user = "luca-tanto"
+    [url "git@github.com-work:"]
+      insteadOf = "git@github.com:"
   '';
 }
