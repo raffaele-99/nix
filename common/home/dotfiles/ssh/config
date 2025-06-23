@@ -9,3 +9,8 @@ Host github.com-personal
     User git
     IdentityFile ~/.ssh/personal
     IdentitiesOnly yes
+
+Host *.tantosec.com
+    User git
+    IdentityFile ~/.ssh/work
+    IdentitiesOnly yes
