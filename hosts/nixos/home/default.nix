@@ -10,6 +10,5 @@
     nmap
     freerdp
     openvpn
-    docker
   ];
 }

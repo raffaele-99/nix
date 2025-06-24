@@ -12,5 +12,6 @@
     jq
     fzf
     _1password-cli
+    glow
   ];
 }
