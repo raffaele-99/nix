@@ -15,7 +15,7 @@
       "discord"
       "arc"
       "google-chrome"
-      "docker"
+      "docker-desktop"
       "visual-studio-code"
       "ghostty"
       "burp-suite-professional"
