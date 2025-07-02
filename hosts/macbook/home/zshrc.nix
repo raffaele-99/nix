@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 # mac-specific zsh config
 {
@@ -7,6 +7,8 @@
     
     # https://nix-community.github.io/home-manager/options.xhtml#opt-programs.zsh.initContent
     initContent = lib.mkOrder 1500 ''
+      source ~/.config/zsh/mac-aliases.sh
+
       export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 
       export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home
