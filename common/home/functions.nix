@@ -1,6 +1,6 @@
 { config, pkgs, ... }:
 {
-  # This creates the functions file that zsh sources
+  # functions shared across all systems
   home.file.".config/zsh/functions.sh".text = ''
 function cls () {
   if [ -n "$1" ]; then

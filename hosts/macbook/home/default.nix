@@ -2,6 +2,8 @@
 {
   imports = [
     ../../../common/home/default.nix
+    ./aliases.nix
+    ./zshrc.nix
   ];
 
   # macOS specific packages

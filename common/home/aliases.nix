@@ -1,5 +1,7 @@
 # common/home/aliases.nix
 { config, pkgs, ... }:
+
+# aliases shared across all systems
 {
   home.file.".config/zsh/aliases.sh".text = ''
     alias ls='ls --color'

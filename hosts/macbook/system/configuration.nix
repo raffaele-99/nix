@@ -19,12 +19,11 @@
       "visual-studio-code"
       "ghostty"
       "burp-suite-professional"
-      
-      "zulu@17"
+      "zulu@17" # added because expo docs said to
     ];
     brews = [
       "glow"
-      "watchman"
+      "watchman" # added because expo docs said to
     ];
     onActivation.cleanup = "zap";
     onActivation.autoUpdate = true;
@@ -35,8 +34,6 @@
   programs.zsh = {
     enable = true;
   };
-
-
 
   users.knownUsers = [ "luca" ];
   users.users.luca.uid = 501;
