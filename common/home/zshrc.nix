@@ -22,6 +22,10 @@
       export PS1='%{%F{2}%}%n %{%f%}at %{%F{4}%}%~%{%F{yellow}%}$(git_branch)%{%f%} $ '
       
       ZSH_AUTOSUGGEST_USE_ASYNC=true
+
+      export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home
+
+      export ANDROID_HOME=$HOME/Library/Android/sdk && export PATH=$PATH:$ANDROID_HOME/emulator && export PATH=$PATH:$ANDROID_HOME/platform-tools
     '';
   };
 }

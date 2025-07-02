@@ -19,9 +19,12 @@
       "visual-studio-code"
       "ghostty"
       "burp-suite-professional"
+      
+      "zulu@17"
     ];
     brews = [
       "glow"
+      "watchman"
     ];
     onActivation.cleanup = "zap";
     onActivation.autoUpdate = true;
