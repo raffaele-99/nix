@@ -5,18 +5,18 @@
 {
   home.file.".config/zsh/mac-functions.sh".text = ''
 cdtag() {
-    local tag="${1:-Currently Working On}"  # Default to "Currently Working On" if no argument
-    local search_path="${2:-/Users/luca}"   # Default search path
+    local tag="Currently Working On"
+    local search_path="/Users/luca"
     
-    # Get the selected directory using fzf
-    local selected=$(tags -r -path "$search_path" -q "$tag" | fzf \
+    local selected=$(cd "$search_path" && tags -r -path . -q "$tag" | while read -r line; do
+        realpath "$line"
+    done | fzf \
         --height 40% \
         --reverse \
         --prompt="Select directory: " \
         --preview 'ls -la {}' \
         --preview-window right:50%:wrap)
     
-    # If a directory was selected, cd to it
     if [[ -n "$selected" ]]; then
         cd "$selected"
     fi
