@@ -4,6 +4,7 @@
     ../../../common/home/default.nix
     ./aliases.nix
     ./zshrc.nix
+    ./functions.nix
   ];
 
   # macOS specific packages

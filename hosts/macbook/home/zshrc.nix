@@ -8,6 +8,7 @@
     # https://nix-community.github.io/home-manager/options.xhtml#opt-programs.zsh.initContent
     initContent = lib.mkOrder 1500 ''
       source ~/.config/zsh/mac-aliases.sh
+      source ~/.config/zsh/mac-functions.sh
 
       export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 

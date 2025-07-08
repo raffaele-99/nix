@@ -10,6 +10,7 @@
     initContent = ''
       source ~/.config/zsh/aliases.sh
       source ~/.config/zsh/functions.sh
+      export PATH="$HOME/go/bin:$PATH"
 
       git_branch() {
         local branch=$(git branch 2>/dev/null | sed -n 's/^\* //p')
