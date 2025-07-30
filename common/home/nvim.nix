@@ -4,7 +4,7 @@
     enable = true;
     defaultEditor = true;
     viAlias = true;
-    vimAlias = true;
+    vimAlias = false; # vimgolf
     
     plugins = with pkgs.vimPlugins; [
       {

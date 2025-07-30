@@ -23,7 +23,6 @@
     ];
     brews = [
       "glow"
-      "watchman" # added because expo docs said to
     ];
     onActivation.cleanup = "zap";
     onActivation.autoUpdate = true;

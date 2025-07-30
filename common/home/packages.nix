@@ -7,11 +7,14 @@
     git
     # zsh already enabled in common/home/zshrc.nix
     # nvim already enabled in common/home/nvim.nix
+    vim
     curl
     wget
     jq
     fzf
     _1password-cli
     glow
+    ruby
+    libyaml
   ];
 }
