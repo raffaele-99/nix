@@ -20,5 +20,5 @@ if [[ "$configured_user" != "$(id -un)" || "$configured_uid" != "$(id -u)" ]]; t
 fi
 
 bash ./build.sh
-sudo nix --extra-experimental-features 'nix-command flakes' run \
+sudo -H nix --extra-experimental-features 'nix-command flakes' run \
   .#darwin-rebuild -- switch --flake .#personal-macbook
