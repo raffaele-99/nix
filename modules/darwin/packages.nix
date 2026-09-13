@@ -35,6 +35,7 @@
     # macOS applications.
     _1password-cli
     _1password-gui
+    brave
     rectangle
     ghostty-bin
     stats
