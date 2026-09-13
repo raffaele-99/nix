@@ -2,6 +2,7 @@
 {
   imports = [
     ./shell.nix
+    ./docker.nix
     ./editor.nix
     ./rectangle.nix
   ];
