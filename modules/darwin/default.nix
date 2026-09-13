@@ -58,6 +58,9 @@ in
     };
     programs.fish.enable = true;
 
+    # Provides both the CLI and its launchd-managed daemon.
+    services.tailscale.enable = true;
+
     launchd.user.agents.colima = lib.mkIf cfg.colima.enable {
       serviceConfig = {
         ProgramArguments = [

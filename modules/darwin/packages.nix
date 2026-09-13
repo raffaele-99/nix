@@ -19,6 +19,8 @@
     coreutils
     cmake
     pi-coding-agent
+    codex
+    vultr-cli
 
     # Analysis tools.
     caido-desktop
@@ -26,11 +28,13 @@
     # Docker-compatible runtime and clients.
     colima
     docker
+    docker-compose
     docker-credential-helpers
     container
 
     # macOS applications.
     _1password-cli
+    _1password-gui
     rectangle
     ghostty-bin
     stats
