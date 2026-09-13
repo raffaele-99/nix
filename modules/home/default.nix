@@ -3,6 +3,7 @@
   imports = [
     ./shell.nix
     ./editor.nix
+    ./rectangle.nix
   ];
 
   programs.git = {
