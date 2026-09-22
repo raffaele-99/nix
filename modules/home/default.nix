@@ -5,6 +5,7 @@
     ./docker.nix
     ./editor.nix
     ./rectangle.nix
+    ./luca.nix
   ];
 
   programs.git = {

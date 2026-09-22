@@ -5,16 +5,24 @@
   shared.uid = 501;
 
   home-manager.users.${config.shared.username} = {
-    programs.git.settings = {
-      user.name = "raffaele-99";
-      user.email = "108209611+raffaele-99@users.noreply.github.com";
-      github.user = "raffaele-99";
-    };
+    programs = {
+      # The personal Mac currently keeps this checkout at ~/nix.
+      luca.settings = {
+        build-flake = "${config.users.users.${config.shared.username}.home}/nix";
+        host = "personal-macbook";
+      };
 
-    programs.ssh = {
-      enable = true;
-      enableDefaultConfig = false;
-      settings."*".IdentityAgent = ''"~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"'';
+      git.settings = {
+        user.name = "raffaele-99";
+        user.email = "108209611+raffaele-99@users.noreply.github.com";
+        github.user = "raffaele-99";
+      };
+
+      ssh = {
+        enable = true;
+        enableDefaultConfig = false;
+        settings."*".IdentityAgent = ''"~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"'';
+      };
     };
 
     # Only offer keys from the Dev vault, rather than the default vaults.

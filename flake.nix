@@ -59,6 +59,12 @@
       # Bootstrap with the same nix-darwin revision as the configuration.
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
+      packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
+      apps.aarch64-darwin.luca = {
+        type = "app";
+        program = "${self.packages.aarch64-darwin.luca}/bin/luca";
+        meta.description = "Build, activate and update this Mac's Nix configuration";
+      };
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt;
     };
 }
