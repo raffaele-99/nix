@@ -8,4 +8,10 @@ let
 in
 {
   home.packages = [ pi ];
+
+  home.file = {
+    ".pi/agent/SYSTEM.md".source = ./pi/SYSTEM.md;
+    ".pi/agent/extensions/context-message.ts".source = ./pi/extensions/context-message.ts;
+    ".pi/agent/extensions/goal.ts".source = ./pi/extensions/goal.ts;
+  };
 }
