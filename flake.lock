@@ -1,5 +1,17 @@
 {
   "nodes": {
+    "caidoRelease": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-ENumVNcyExeUqo2RmqBLTbJvtdEvYHoC1iAZBbZtQAY=",
+        "type": "file",
+        "url": "https://caido.download/releases/latest"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://caido.download/releases/latest"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -58,6 +70,7 @@
     },
     "root": {
       "inputs": {
+        "caidoRelease": "caidoRelease",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
         "nixpkgs": "nixpkgs"

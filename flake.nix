@@ -11,6 +11,10 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    caidoRelease = {
+      url = "file+https://caido.download/releases/latest";
+      flake = false;
+    };
   };
 
   outputs =
@@ -19,8 +23,20 @@
       nixpkgs,
       nix-darwin,
       home-manager,
+      caidoRelease,
       ...
     }:
+    let
+      caidoReleaseInfo = builtins.fromJSON (builtins.readFile caidoRelease);
+      caidoOverlay = final: _prev: {
+        caido-desktop = final.callPackage ./pkgs/caido/package.nix { releaseInfo = caidoReleaseInfo; };
+      };
+      darwinPkgs = import nixpkgs {
+        system = "aarch64-darwin";
+        config.allowUnfree = true;
+        overlays = [ caidoOverlay ];
+      };
+    in
     {
       homeModules.default = ./modules/home;
 
@@ -30,6 +46,7 @@
           ./modules/darwin
         ];
         home-manager.sharedModules = [ self.homeModules.default ];
+        nixpkgs.overlays = [ caidoOverlay ];
       };
 
       darwinConfigurations.personal-macbook = nix-darwin.lib.darwinSystem {
@@ -41,6 +58,7 @@
 
       # Bootstrap with the same nix-darwin revision as the configuration.
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
+      packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt;
     };
 }
