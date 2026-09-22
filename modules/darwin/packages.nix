@@ -18,7 +18,6 @@
     nixfmt
     coreutils
     cmake
-    pi-coding-agent
     codex
     vultr-cli
 

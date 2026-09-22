@@ -60,10 +60,20 @@
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
+      packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/pi-sandbox {
+        nixpkgsPath = nixpkgs.outPath;
+        onePasswordCli = darwinPkgs._1password-cli;
+        realPi = nixpkgs.legacyPackages.aarch64-darwin.pi-coding-agent;
+      };
       apps.aarch64-darwin.luca = {
         type = "app";
         program = "${self.packages.aarch64-darwin.luca}/bin/luca";
         meta.description = "Build, activate and update this Mac's Nix configuration";
+      };
+      apps.aarch64-darwin.pi = {
+        type = "app";
+        program = "${self.packages.aarch64-darwin.pi}/bin/pi";
+        meta.description = "Run Pi natively or in an opt-in Docker sandbox";
       };
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt;
     };

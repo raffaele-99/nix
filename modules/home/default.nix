@@ -6,6 +6,7 @@
     ./editor.nix
     ./rectangle.nix
     ./luca.nix
+    ./pi.nix
   ];
 
   programs.git = {
