@@ -1,7 +1,11 @@
-{ pkgs, ... }:
+{
+  pkgs,
+  sharedNixpkgsRev,
+  ...
+}:
 let
   pi = pkgs.callPackage ../../pkgs/pi-sandbox {
-    nixpkgsPath = pkgs.path;
+    nixpkgsRev = sharedNixpkgsRev;
     onePasswordCli = pkgs._1password-cli;
     realPi = pkgs.pi-coding-agent;
   };

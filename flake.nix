@@ -46,6 +46,7 @@
           ./modules/darwin
         ];
         home-manager.sharedModules = [ self.homeModules.default ];
+        home-manager.extraSpecialArgs.sharedNixpkgsRev = nixpkgs.rev;
         nixpkgs.overlays = [ caidoOverlay ];
       };
 
@@ -61,7 +62,7 @@
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
       packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/pi-sandbox {
-        nixpkgsPath = nixpkgs.outPath;
+        nixpkgsRev = nixpkgs.rev;
         onePasswordCli = darwinPkgs._1password-cli;
         realPi = nixpkgs.legacyPackages.aarch64-darwin.pi-coding-agent;
       };
