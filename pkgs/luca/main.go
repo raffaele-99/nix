@@ -26,6 +26,7 @@ Commands:
   build-only        build without activating (leaves ./result in checkout)
   update [inputs]   update flakes + build + activate
   update-only [...] update without building or activating
+  clean             keep 2 system generations and garbage-collect the store
   completions SHELL print completions for bash/zsh/fish
 
 Options:
@@ -48,7 +49,8 @@ Misc:
 - passing inputs to the update command will replace the update-flakes list
 - Input overrides apply to evaluation/build/activation, never to lock-file updates.
 - New files must be added to Git explicitly.
-- This tool never stages, commits, pushes, deletes generations, or runs garbage collection.
+- This tool never stages, commits, or pushes.
+- Only the clean command deletes generations or runs garbage collection.
 `
 
 type options struct {
@@ -104,7 +106,7 @@ func parseOptions(args []string) (options, error) {
 		return o, errors.New("--config and --no-config cannot be combined")
 	}
 	switch o.command {
-	case "build", "switch", "build-only":
+	case "build", "switch", "build-only", "clean":
 		if len(o.inputs) != 0 {
 			return o, fmt.Errorf("%s does not accept positional arguments", o.command)
 		}
@@ -248,7 +250,10 @@ func (a application) execute(ctx context.Context, cfg configuration, o options) 
 		return errors.New("this helper manages nix-darwin; run it on macOS")
 	}
 	if a.uid == 0 {
-		return errors.New("run luca as your normal macOS user; it requests sudo only for activation")
+		return errors.New("run luca as your normal macOS user; it requests sudo only when needed")
+	}
+	if o.command == "clean" {
+		return a.clean(ctx)
 	}
 	updating := o.command == "update" || o.command == "update-only"
 	activating := o.command == "build" || o.command == "switch" || o.command == "update"
@@ -328,6 +333,23 @@ func (a application) execute(ctx context.Context, cfg configuration, o options) 
 	return err
 }
 
+func (a application) clean(ctx context.Context) error {
+	deleteGenerations := invocation{
+		dir:     ".",
+		program: "/usr/bin/sudo",
+		args: []string{
+			"-H", "--", "nix-env",
+			"--profile", "/nix/var/nix/profiles/system",
+			"--delete-generations", "+2",
+		},
+	}
+	if _, err := a.command(ctx, deleteGenerations, false); err != nil {
+		return err
+	}
+	_, err := a.command(ctx, nixCommand(".", "store", "gc"), false)
+	return err
+}
+
 func (a application) selectHost(ctx context.Context, cfg *configuration) error {
 	if cfg.Host != "" {
 		return nil
@@ -388,7 +410,7 @@ func writeCompletions(w io.Writer, shell string) error {
 	switch shell {
 	case "fish":
 		script = `complete -c luca -f
-complete -c luca -n '__fish_use_subcommand' -a 'build switch build-only update update-only completions'
+complete -c luca -n '__fish_use_subcommand' -a 'build switch build-only update update-only clean completions'
 complete -c luca -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish'
 complete -c luca -l config -r -F -d 'JSON configuration file'
 complete -c luca -l no-config -d 'Ignore installed configuration'
@@ -409,7 +431,7 @@ complete -c luca -l help -d 'Show help'
     --host|--override-input) return ;;
     completions) COMPREPLY=($(compgen -W 'bash zsh fish' -- "$cur")); return ;;
   esac
-  COMPREPLY=($(compgen -W 'build switch build-only update update-only completions --config --no-config --build-flake --host --update-flake --override-input --dry-run --help' -- "$cur"))
+  COMPREPLY=($(compgen -W 'build switch build-only update update-only clean completions --config --no-config --build-flake --host --update-flake --override-input --dry-run --help' -- "$cur"))
 }
 complete -F _luca luca
 `
@@ -427,7 +449,7 @@ _luca() {
     '*--override-input[Build input override]:NAME=VALUE:' \
     '--dry-run[Print actions; run read-only checks]' \
     '--help[Show help]' \
-    '1:command:(build switch build-only update update-only completions)' \
+    '1:command:(build switch build-only update update-only clean completions)' \
     '*::argument:->args'
   if [[ "$state" == args && "$words[1]" == completions ]]; then
     _values 'shell' bash zsh fish
