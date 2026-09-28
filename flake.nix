@@ -60,6 +60,7 @@
       # Bootstrap with the same nix-darwin revision as the configuration.
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
+      packages.aarch64-darwin.scanhaus = darwinPkgs.callPackage ./pkgs/scanhaus { };
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
       packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/pi-sandbox {
         nixpkgsRev = nixpkgs.rev;
@@ -75,6 +76,10 @@
         type = "app";
         program = "${self.packages.aarch64-darwin.pi}/bin/pi";
         meta.description = "Run Pi natively or in an opt-in Docker sandbox";
+      };
+      apps.aarch64-darwin.scanhaus = {
+        type = "app";
+        program = "${self.packages.aarch64-darwin.scanhaus}/bin/scanhaus";
       };
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt;
     };
