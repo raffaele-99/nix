@@ -18,8 +18,8 @@
     nixfmt
     coreutils
     cmake
-    codex
     vultr-cli
+    mullvad
 
     # Analysis tools.
     caido-desktop
