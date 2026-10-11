@@ -12,6 +12,8 @@
   };
 
   config = {
+    environment.systemPackages = [ (pkgs.callPackage ../pkgs/tart { }) ];
+
     security.pam.services.sudo_local.enable = true;
 
     home-manager.users.${config.shared.username} = {

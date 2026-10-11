@@ -68,6 +68,7 @@
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
       packages.aarch64-darwin.scanhaus = darwinPkgs.callPackage ./pkgs/scanhaus { };
+      packages.aarch64-darwin.tart = darwinPkgs.callPackage ./pkgs/tart { };
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
       packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/pi-sandbox {
         nixpkgsRev = nixpkgs.rev;
@@ -87,6 +88,10 @@
       apps.aarch64-darwin.scanhaus = {
         type = "app";
         program = "${self.packages.aarch64-darwin.scanhaus}/bin/scanhaus";
+      };
+      apps.aarch64-darwin.tart = {
+        type = "app";
+        program = "${self.packages.aarch64-darwin.tart}/bin/tart";
       };
       formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt;
     };
