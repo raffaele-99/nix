@@ -1,19 +1,30 @@
-{ config, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 {
   imports = [ ./personal.nix ];
 
-  home-manager.users.${config.shared.username} = {
-    programs = {
-      rectangle.enable = false;
+  options.environment.systemPackages = lib.mkOption {
+    apply = lib.remove pkgs.brave;
+  };
 
-      luca.settings.host = "mac-mini";
-    };
+  config = {
+    home-manager.users.${config.shared.username} = {
+      programs = {
+        rectangle.enable = false;
 
-    home.file = {
-      ".config/aerospace/aerospace.toml".source = ./aerospace.toml;
-      ".config/aerospace/ghostty.sh" = {
-        source = ./aerospace-ghostty.sh;
-        executable = true;
+        luca.settings.host = "mac-mini";
+      };
+
+      home.file = {
+        ".config/aerospace/aerospace.toml".source = ./aerospace.toml;
+        ".config/aerospace/ghostty.sh" = {
+          source = ./aerospace-ghostty.sh;
+          executable = true;
+        };
       };
     };
   };
