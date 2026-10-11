@@ -88,13 +88,14 @@ in
     security.pam.services.sudo_local.touchIdAuth = true;
     system.primaryUser = cfg.username;
     system.defaults.dock.autohide = lib.mkDefault false;
-    # An empty Brewfile removes installed formulae and casks on activation.
-    # Keep Homebrew itself and retain application data by avoiding "zap".
+
+    # empty brewfile to clear all formulae and casks on nix activation/rebuild
+    # keep brew because its easy sometimes
     homebrew = {
       enable = true;
       brews = [ ];
       casks = [ ];
-      onActivation.cleanup = "uninstall";
+      onActivation.cleanup = "zap";
       onActivation.autoUpdate = false;
       onActivation.upgrade = false;
       global.autoUpdate = false;
