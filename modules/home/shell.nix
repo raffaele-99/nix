@@ -10,8 +10,8 @@
       set -gx EDITOR nvim
     '';
     shellAliases = {
-      daniel = "nix run --extra-experimental-features 'nix-command flakes' github:stacksparrow4/nix#nvim";
-      daniel-unboxed = "nix run --extra-experimental-features 'nix-command flakes' github:stacksparrow4/nix#nvim-unboxed";
+      di = "nix run --extra-experimental-features 'nix-command flakes' github:stacksparrow4/nix#nvim";
+      diu = "nix run --extra-experimental-features 'nix-command flakes' github:stacksparrow4/nix#nvim-unboxed";
     };
   };
 }
