@@ -70,18 +70,6 @@ in
     # Provides both the CLI and its launchd-managed daemon.
     services.tailscale.enable = true;
 
-    launchd.daemons.mullvad.serviceConfig = {
-      Label = "net.mullvad.daemon";
-      ProgramArguments = [
-        "${pkgs.mullvad}/bin/mullvad-daemon"
-        "-vv"
-      ];
-      UserName = "root";
-      RunAtLoad = true;
-      KeepAlive = true;
-      SoftResourceLimits.NumberOfFiles = 1024;
-    };
-
     launchd.user.agents.colima = lib.mkIf cfg.colima.enable {
       serviceConfig = {
         ProgramArguments = [

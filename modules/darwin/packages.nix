@@ -8,7 +8,7 @@
   environment.systemPackages =
     with pkgs;
     [
-      # Command-line and development tools.
+      # agojadfsbdf
       curl
       wget
       gh
@@ -19,29 +19,31 @@
       fzf
       glow
       ffmpeg
+
+      # haeenaner
       ansible
       opentofu
       awscli2
+      vultr-cli
+
+      # xcvbjkepe
       nixfmt
       coreutils
       cmake
-      vultr-cli
-      mullvad
 
-      # Analysis tools.
+      # vcxbiofse
       caido-desktop
 
       # Native container runtime.
       container
 
-      # macOS applications.
+      # nasoignw
       _1password-cli
       _1password-gui
       brave
       ghostty-bin
-      stats
-      syntax-highlight
       grandperspective
+
     ]
     ++ lib.optionals config.shared.colima.enable [
       colima
