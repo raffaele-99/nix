@@ -31,11 +31,7 @@
       # Analysis tools.
       caido-desktop
 
-      # Docker-compatible runtime and clients.
-      colima
-      docker
-      docker-compose
-      docker-credential-helpers
+      # Native container runtime.
       container
 
       # macOS applications.
@@ -46,6 +42,12 @@
       stats
       syntax-highlight
       grandperspective
+    ]
+    ++ lib.optionals config.shared.colima.enable [
+      colima
+      docker
+      docker-compose
+      docker-credential-helpers
     ]
     ++
       lib.optional config.home-manager.users.${config.shared.username}.programs.rectangle.enable

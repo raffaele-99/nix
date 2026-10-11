@@ -24,7 +24,12 @@ in
     colima.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Start Colima at login to provide a Linux Docker runtime.";
+      description = "Install and configure Colima, Docker, Compose, and credential helpers.";
+    };
+    pi.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Install Pi and configure its agent instructions and extensions.";
     };
   };
 
@@ -45,6 +50,10 @@ in
       useGlobalPkgs = true;
       useUserPackages = true;
       users.${cfg.username} = {
+        disabledModules =
+          lib.optional (!cfg.colima.enable) ../home/docker.nix
+          ++ lib.optional (!cfg.pi.enable) ../home/pi.nix;
+
         home.username = cfg.username;
         home.homeDirectory = homeDirectory;
       };
