@@ -12,6 +12,8 @@
   };
 
   config = {
+    security.pam.services.sudo_local.enable = true;
+
     home-manager.users.${config.shared.username} = {
       programs = {
         rectangle.enable = false;
