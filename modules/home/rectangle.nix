@@ -1,4 +1,4 @@
-{ ... }:
+{ lib, ... }:
 let
   # Native macOS modifier flags; these combinations have no named HM preset.
   shift = 131072;
@@ -11,7 +11,7 @@ let
 in
 {
   programs.rectangle = {
-    enable = true;
+    enable = lib.mkDefault true;
     # Installed system-wide by the shared Darwin package module.
     package = null;
 
