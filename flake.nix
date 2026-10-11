@@ -57,6 +57,13 @@
         ];
       };
 
+      darwinConfigurations.mac-mini = nix-darwin.lib.darwinSystem {
+        modules = [
+          self.darwinModules.default
+          ./hosts/mac-mini.nix
+        ];
+      };
+
       # Bootstrap with the same nix-darwin revision as the configuration.
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
