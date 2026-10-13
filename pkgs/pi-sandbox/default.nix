@@ -224,6 +224,7 @@ let
       docker_socket=false
       ssh_agent=false
       op_socket=false
+      no_cwd=false
       passthrough=false
       caido_url=""
       caido_container_url=""
@@ -251,6 +252,10 @@ let
             ;;
           --op-socket)
             op_socket=true
+            shift
+            ;;
+          --no-cwd)
+            no_cwd=true
             shift
             ;;
           --caido-url)
@@ -352,6 +357,9 @@ let
           export REQUESTS_CA_BUNDLE="$caido_bundle"
           pi_args=(-e ${./caido-openrouter.ts} "''${pi_args[@]}")
         fi
+        if $no_cwd; then
+          pi_args=(-e ${./no-cwd.ts} "''${pi_args[@]}")
+        fi
         exec ${realPi}/bin/pi "''${pi_args[@]}"
       fi
 
@@ -431,6 +439,11 @@ let
       for name in SYSTEM.md APPEND_SYSTEM.md settings.json models.json trust.json extensions skills prompts themes; do
         copy_agent_item "$name"
       done
+
+      if $no_cwd; then
+        install -m 0444 ${./no-cwd.ts} "$agent_dir/no-cwd.ts"
+        pi_args=(-e /root/.pi/agent/no-cwd.ts "''${pi_args[@]}")
+      fi
 
       if [[ -n "$caido_url" ]]; then
         fetch_caido_certificate "$agent_dir/caido-ca.crt"
