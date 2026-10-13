@@ -103,6 +103,26 @@ let
         export PATH=${opBridgeClient}/bin:$PATH
       fi
 
+      if [[ -n "''${PI_CAIDO_CA_CERT:-}" ]]; then
+        [[ -r "$PI_CAIDO_CA_CERT" ]] || {
+          echo "pi: Caido CA certificate is unavailable in the sandbox" >&2
+          exit 1
+        }
+        [[ -r "''${SSL_CERT_FILE:-}" ]] || {
+          echo "pi: sandbox system CA bundle is unavailable" >&2
+          exit 1
+        }
+        caido_bundle=/run/caido-ca-bundle.crt
+        cat "$SSL_CERT_FILE" "$PI_CAIDO_CA_CERT" > "$caido_bundle"
+        chmod 600 "$caido_bundle"
+        export SSL_CERT_FILE="$caido_bundle"
+        export NIX_SSL_CERT_FILE="$caido_bundle"
+        export NODE_EXTRA_CA_CERTS="$caido_bundle"
+        export CURL_CA_BUNDLE="$caido_bundle"
+        export GIT_SSL_CAINFO="$caido_bundle"
+        export REQUESTS_CA_BUNDLE="$caido_bundle"
+      fi
+
       exec ${pkgs.pi-coding-agent}/bin/pi "$@"
     '';
   };

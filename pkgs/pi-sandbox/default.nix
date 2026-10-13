@@ -3,7 +3,10 @@
   writeShellApplication,
   writeText,
   symlinkJoin,
+  cacert,
+  curl,
   docker,
+  openssl,
   socat,
   python3,
   coreutils,
@@ -158,11 +161,61 @@ let
     Server(("127.0.0.1", PORT), Handler).serve_forever()
   '';
 
+  caidoUrlResolver = writeText "pi-caido-url.py" ''
+    import hashlib
+    import ipaddress
+    import sys
+    from urllib.parse import urlsplit, urlunsplit
+
+
+    def fail(message):
+        print(f"pi: invalid --caido-url: {message}", file=sys.stderr)
+        raise SystemExit(2)
+
+
+    value = sys.argv[1].strip()
+    if any(character.isspace() for character in value):
+        fail("whitespace is not allowed")
+
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() != "http":
+        fail("the proxy URL must use http://")
+    if not parsed.hostname:
+        fail("a hostname is required")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        fail("paths, queries, and fragments are not supported")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        fail(str(error))
+
+    host_url = urlunsplit(("http", parsed.netloc, "", "", ""))
+    hostname = parsed.hostname.lower()
+    is_loopback = hostname == "localhost"
+    try:
+        is_loopback = is_loopback or ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        pass
+
+    container_netloc = parsed.netloc
+    if is_loopback:
+        userinfo, separator, _host_port = parsed.netloc.rpartition("@")
+        container_netloc = (userinfo + separator if separator else "") + "host.docker.internal"
+        if port is not None:
+            container_netloc += f":{port}"
+
+    container_url = urlunsplit(("http", container_netloc, "", "", ""))
+    cache_key = hashlib.sha256(host_url.encode()).hexdigest()[:16]
+    print("\t".join((host_url, container_url, cache_key)))
+  '';
+
   wrapper = writeShellApplication {
     name = "pi";
     runtimeInputs = [
       coreutils
+      curl
       docker
+      openssl
       python3
       socat
     ];
@@ -172,30 +225,132 @@ let
       ssh_agent=false
       op_socket=false
       passthrough=false
+      caido_url=""
+      caido_container_url=""
+      caido_cache_key=""
       pi_args=()
 
-      for arg in "$@"; do
+      while (( $# > 0 )); do
         if $passthrough; then
-          pi_args+=("$arg")
+          pi_args+=("$1")
+          shift
           continue
         fi
-        case "$arg" in
-          --sandbox) sandbox=true ;;
-          --docker-socket) docker_socket=true ;;
-          --ssh-agent) ssh_agent=true ;;
-          --op-socket) op_socket=true ;;
+        case "$1" in
+          --sandbox)
+            sandbox=true
+            shift
+            ;;
+          --docker-socket)
+            docker_socket=true
+            shift
+            ;;
+          --ssh-agent)
+            ssh_agent=true
+            shift
+            ;;
+          --op-socket)
+            op_socket=true
+            shift
+            ;;
+          --caido-url)
+            if (( $# < 2 )) || [[ -z "$2" || "$2" == --* ]]; then
+              echo "pi: --caido-url requires an HTTP URL" >&2
+              exit 2
+            fi
+            caido_url="$2"
+            shift 2
+            ;;
+          --caido-url=*)
+            caido_url="''${1#*=}"
+            if [[ -z "$caido_url" ]]; then
+              echo "pi: --caido-url requires an HTTP URL" >&2
+              exit 2
+            fi
+            shift
+            ;;
           --)
             passthrough=true
-            pi_args+=("$arg")
+            pi_args+=("$1")
+            shift
             ;;
-          *) pi_args+=("$arg") ;;
+          *)
+            pi_args+=("$1")
+            shift
+            ;;
         esac
       done
+
+      if [[ -n "$caido_url" ]]; then
+        caido_details="$(${python3}/bin/python3 ${caidoUrlResolver} "$caido_url")"
+        IFS=$'\t' read -r caido_url caido_container_url caido_cache_key <<< "$caido_details"
+      fi
+
+      fetch_caido_certificate() {
+        local destination="$1"
+        local temporary
+        temporary="$(mktemp "$destination.tmp.XXXXXX")"
+        if ! ${curl}/bin/curl \
+          --fail \
+          --silent \
+          --show-error \
+          --location \
+          --noproxy '*' \
+          --connect-timeout 3 \
+          --max-time 10 \
+          --output "$temporary" \
+          "$caido_url/ca.crt"; then
+          rm -f "$temporary"
+          echo "pi: failed to download Caido CA certificate from $caido_url/ca.crt" >&2
+          exit 1
+        fi
+        if ! ${openssl}/bin/openssl x509 -in "$temporary" -noout >/dev/null 2>&1; then
+          rm -f "$temporary"
+          echo "pi: $caido_url/ca.crt did not return a valid PEM certificate" >&2
+          exit 1
+        fi
+        chmod 600 "$temporary"
+        mv -f "$temporary" "$destination"
+      }
+
+      build_caido_bundle() {
+        local certificate="$1"
+        local destination="$2"
+        local temporary
+        temporary="$(mktemp "$destination.tmp.XXXXXX")"
+        cat ${cacert}/etc/ssl/certs/ca-bundle.crt "$certificate" > "$temporary"
+        chmod 600 "$temporary"
+        mv -f "$temporary" "$destination"
+      }
+
+      state_root="$HOME/.cache/pi-sandbox"
 
       if ! $sandbox; then
         if $docker_socket || $ssh_agent || $op_socket; then
           echo "pi: --docker-socket, --ssh-agent and --op-socket require --sandbox" >&2
           exit 2
+        fi
+        if [[ -n "$caido_url" ]]; then
+          caido_dir="$state_root/caido/$caido_cache_key"
+          mkdir -p "$caido_dir"
+          chmod 700 "$state_root/caido" "$caido_dir"
+          caido_certificate="$caido_dir/ca.crt"
+          caido_bundle="$caido_dir/ca-bundle.crt"
+          fetch_caido_certificate "$caido_certificate"
+          build_caido_bundle "$caido_certificate" "$caido_bundle"
+          export HTTP_PROXY="$caido_url"
+          export HTTPS_PROXY="$caido_url"
+          export http_proxy="$caido_url"
+          export https_proxy="$caido_url"
+          export NO_PROXY=""
+          export no_proxy=""
+          export SSL_CERT_FILE="$caido_bundle"
+          export NIX_SSL_CERT_FILE="$caido_bundle"
+          export NODE_EXTRA_CA_CERTS="$caido_bundle"
+          export CURL_CA_BUNDLE="$caido_bundle"
+          export GIT_SSL_CAINFO="$caido_bundle"
+          export REQUESTS_CA_BUNDLE="$caido_bundle"
+          pi_args=(-e ${./caido-openrouter.ts} "''${pi_args[@]}")
         fi
         exec ${realPi}/bin/pi "''${pi_args[@]}"
       fi
@@ -209,7 +364,6 @@ let
         exit 1
       }
 
-      state_root="$HOME/.cache/pi-sandbox"
       mkdir -p "$state_root"
       session_dir="$(mktemp -d "$state_root/session.XXXXXX")"
       chmod 700 "$session_dir"
@@ -278,6 +432,12 @@ let
         copy_agent_item "$name"
       done
 
+      if [[ -n "$caido_url" ]]; then
+        fetch_caido_certificate "$agent_dir/caido-ca.crt"
+        install -m 0444 ${./caido-openrouter.ts} "$agent_dir/caido-openrouter.ts"
+        pi_args=(-e /root/.pi/agent/caido-openrouter.ts "''${pi_args[@]}")
+      fi
+
       global_agents_dir="$session_dir/home-agents"
       mkdir -p "$global_agents_dir"
       if [[ -d "$HOME/.agents/skills" ]]; then
@@ -314,6 +474,17 @@ let
       if [[ -f "$host_agent/models-store.json" ]]; then
         : > "$agent_dir/models-store.json"
         docker_args+=(--mount "type=bind,src=$host_agent/models-store.json,dst=/root/.pi/agent/models-store.json")
+      fi
+      if [[ -n "$caido_url" ]]; then
+        docker_args+=(
+          --env "HTTP_PROXY=$caido_container_url"
+          --env "HTTPS_PROXY=$caido_container_url"
+          --env "http_proxy=$caido_container_url"
+          --env "https_proxy=$caido_container_url"
+          --env "NO_PROXY="
+          --env "no_proxy="
+          --env "PI_CAIDO_CA_CERT=/root/.pi/agent/caido-ca.crt"
+        )
       fi
       if $docker_socket; then
         docker_args+=(
