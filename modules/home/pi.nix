@@ -17,5 +17,6 @@ in
     ".pi/agent/SYSTEM.md".source = ./pi/SYSTEM.md;
     ".pi/agent/extensions/context-message.ts".source = ./pi/extensions/context-message.ts;
     ".pi/agent/extensions/goal.ts".source = ./pi/extensions/goal.ts;
+    ".pi/agent/extensions/openrouter-model.ts".source = ./pi/extensions/openrouter-model.ts;
   };
 }
