@@ -25,6 +25,7 @@
       opentofu
       awscli2
       vultr-cli
+      (callPackage ../../pkgs/bxs { })
 
       # xcvbjkepe
       nixfmt
