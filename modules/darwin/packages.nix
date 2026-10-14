@@ -19,6 +19,7 @@
       fzf
       glow
       ffmpeg
+      watch
 
       # haeenaner
       ansible
