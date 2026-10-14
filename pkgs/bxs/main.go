@@ -1,6 +1,4 @@
-// bxs is a minimal web search CLI for agents. It runs Brave Search's bx CLI
-// and reduces `bx web` output to a compact JSON array of web page results, so
-// a single search doesn't flood an agent's context.
+// wrapper around `bx` to provide minimal web search CLI for agents
 package main
 
 import (
