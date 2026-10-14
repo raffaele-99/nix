@@ -64,6 +64,10 @@
         ];
       };
 
+      packages.aarch64-linux.re-tools = import ./pkgs/pi-sandbox/toolsets/re {
+        pkgs = nixpkgs.legacyPackages.aarch64-linux;
+      };
+
       # Bootstrap with the same nix-darwin revision as the configuration.
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
