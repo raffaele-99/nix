@@ -10,10 +10,15 @@
   socat,
   python3,
   coreutils,
+  gnused,
   nixpkgsRev,
   onePasswordCli,
   realPi,
+  sandboxToolsets ? import ./toolsets,
 }:
+assert lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (
+  lib.attrNames sandboxToolsets
+);
 let
   imageRevision = builtins.substring 0 12 (
     builtins.hashString "sha256" "${nixpkgsRev}:${builtins.readFile ./image.nix}"
@@ -21,6 +26,11 @@ let
   imageName = "luca/pi-sandbox";
   imageTag = "${realPi.version}-${imageRevision}";
   imageRef = "${imageName}:${imageTag}";
+  toolsetsKey = builtins.substring 0 16 (
+    builtins.hashString "sha256" (
+      nixpkgsRev + lib.concatMapStrings (path: "${path}") (lib.attrValues sandboxToolsets)
+    )
+  );
 
   # The desktop app authenticates the peer connected to s.sock, so a raw socat
   # relay is rejected. This narrow RPC bridge executes the signed host op CLI
@@ -213,6 +223,7 @@ let
     name = "pi";
     runtimeInputs = [
       coreutils
+      gnused
       curl
       docker
       openssl
@@ -229,6 +240,7 @@ let
       caido_url=""
       caido_container_url=""
       caido_cache_key=""
+      toolsets=()
       pi_args=()
 
       while (( $# > 0 )); do
@@ -240,6 +252,18 @@ let
         case "$1" in
           --sandbox)
             sandbox=true
+            shift
+            ;;
+          --tools)
+            if (( $# < 2 )) || [[ -z "$2" || "$2" == --* ]]; then
+              echo "pi: --tools requires a registered toolset name" >&2
+              exit 2
+            fi
+            toolsets+=("$2")
+            shift 2
+            ;;
+          --tools=*)
+            toolsets+=("''${1#*=}")
             shift
             ;;
           --docker-socket)
@@ -282,6 +306,18 @@ let
           *)
             pi_args+=("$1")
             shift
+            ;;
+        esac
+      done
+
+      for toolset in "''${toolsets[@]}"; do
+        case "$toolset" in
+          ${lib.concatMapStringsSep "\n" (name: ''
+            ${lib.escapeShellArg name}) ;;
+          '') (lib.attrNames sandboxToolsets)}
+          *)
+            echo "pi: unknown toolset '$toolset'; available: ${lib.concatStringsSep ", " (lib.attrNames sandboxToolsets)}" >&2
+            exit 2
             ;;
         esac
       done
@@ -331,8 +367,8 @@ let
       state_root="$HOME/.cache/pi-sandbox"
 
       if ! $sandbox; then
-        if $docker_socket || $ssh_agent || $op_socket; then
-          echo "pi: --docker-socket, --ssh-agent and --op-socket require --sandbox" >&2
+        if $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} > 0 )); then
+          echo "pi: --docker-socket, --ssh-agent, --op-socket and --tools require --sandbox" >&2
           exit 2
         fi
         if [[ -n "$caido_url" ]]; then
@@ -556,6 +592,56 @@ let
             cat "$out"
           ' pi-image ${lib.escapeShellArg nixpkgsRev} ${lib.escapeShellArg imageTag} \
           | docker load >&2
+      fi
+
+      if (( ''${#toolsets[@]} > 0 )); then
+        toolsets_dir="$session_dir/toolsets"
+        mkdir -p "$toolsets_dir"
+        install -m 0444 ${./prepare-tools.sh} "$toolsets_dir/prepare-tools.sh"
+        for toolset in "''${toolsets[@]}"; do
+          [[ ! -e "$toolsets_dir/$toolset" ]] || continue
+          case "$toolset" in
+            ${lib.concatMapStringsSep "\n" (name: ''
+              ${lib.escapeShellArg name})
+                cp -RL ${lib.escapeShellArg "${sandboxToolsets.${name}}"} "$toolsets_dir/$toolset"
+                chmod -R u+w "$toolsets_dir/$toolset"
+                ;;
+            '') (lib.attrNames sandboxToolsets)}
+          esac
+        done
+
+        echo ":: provisioning sandbox tools: ''${toolsets[*]}" >&2
+        docker run --rm --platform linux/arm64 \
+          --mount "type=bind,src=$toolsets_dir,dst=/toolsets,readonly" \
+          --mount "type=volume,src=luca-pi-sandbox-nix,dst=/nix" \
+          --entrypoint /bin/sh \
+          nixos/nix:2.31.2 /toolsets/prepare-tools.sh \
+          ${lib.escapeShellArg nixpkgsRev} ${lib.escapeShellArg toolsetsKey} \
+          "''${toolsets[@]}" > "$session_dir/tools.manifest"
+
+        # Bind mounts use paths on the Docker daemon's Linux filesystem, so
+        # both directory and regular-file store objects can be exposed.
+        nix_volume_root="$(docker volume inspect luca-pi-sandbox-nix --format '{{.Mountpoint}}')"
+        sandbox_path="$(docker image inspect ${lib.escapeShellArg imageRef} \
+          --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^PATH=//p')"
+        tool_bins=()
+        closure_paths=()
+        while IFS=$'\t' read -r kind path; do
+          case "$kind" in
+            bin) tool_bins+=("$path") ;;
+            mount) closure_paths+=("$path") ;;
+          esac
+        done < "$session_dir/tools.manifest"
+        while IFS= read -r path; do
+          docker_args+=(--mount "type=bind,src=$nix_volume_root/''${path#/nix/},dst=$path,readonly")
+        done < <(printf '%s\n' "''${closure_paths[@]}" | sort -u)
+        for tool_bin in "''${tool_bins[@]}"; do
+          sandbox_path="$tool_bin:$sandbox_path"
+        done
+        docker_args+=(
+          --env "PATH=$sandbox_path"
+          --env XDG_CONFIG_HOME=/root/.cache/config
+        )
       fi
 
       docker "''${docker_args[@]}" ${lib.escapeShellArg imageRef} "''${pi_args[@]}"
