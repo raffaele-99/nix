@@ -1,78 +1,60 @@
-# Pi sandbox toolsets
+# pi-sandbox
 
-The Pi wrapper, toolset catalog, and toolset packages live together in this
-directory. Both the installed Home Manager package and `nix run .#pi` use the
-catalog in `toolsets/default.nix`.
+macos pi wrapper to handle sandboxing and stuff
 
-## Use a toolset
+## usage
 
-After rebuilding with `luca build`:
+- `pi`: plain pi
+- `pi --sandbox`: pi in container
+- `pi --sandbox --tools re`: pi in container with tools installed
 
-```sh
-pi --sandbox --tools re
-```
+## sandbox
 
-Repeat `--tools NAME` to combine toolsets. The launcher provisions Linux
-packages on demand, caches them in its Linux Nix store, and mounts their complete
-runtime closures read-only into the existing sandbox image. Sessions without
-`--tools` do not receive these extra tools. Adding tools does not rebuild the
-sandbox image or install the Linux executables on the macOS host.
+- needs docker
+- image built on first use
+- cwd mounted at `/workspace`, `.git` read-only
+- pi config, auth, sessions mapped in
+- read-only root, no caps, no-new-privileges
 
-## Add a toolset
+container is deleted whenever you close pi
 
-Create `toolsets/data/default.nix`:
+## flags
 
-```nix
-{ nixpkgsRev }:
-let
-  pkgs = import (builtins.fetchTarball {
-    url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgsRev}.tar.gz";
-  }) {
-    system = "aarch64-linux";
-  };
-in
-pkgs.symlinkJoin {
-  name = "data-tools";
-  paths = with pkgs; [ jq yq-go ripgrep ];
-}
-```
+- `--sandbox`: run in container
+- `--tools NAME`: add toolset, repeatable
+- `--docker-socket`: expose host docker socket
+- `--ssh-agent`: relay host ssh agent
+- `--op-socket`: restricted 1password cli bridge
+- `--caido-url URL`: proxy via caido + trust its ca
+- `--no-cwd`: strip cwd from system prompt
 
-Register it in `toolsets/default.nix`:
+all flags need `--sandbox` except `--caido-url` and `--no-cwd`
 
-```nix
-{
-  re = ./re;
-  data = ./data;
-}
-```
+everything else passes through to pi
 
-From the personal Nix repository, make the new files visible to Git-backed
-flakes and rebuild:
+## toolsets
 
-```sh
-git add --intent-to-add pkgs/pi-sandbox/toolsets/data/default.nix
-luca build
-pi --sandbox --tools data
-```
+> sometimes want agent do things. but, need tools
 
-Each toolset must accept `nixpkgsRev` and return an `aarch64-linux` package with
-a `bin` directory. The launcher supplies the pinned nixpkgs revision. Keep
-supporting expressions inside the toolset directory because the launcher copies
-that directory into its provisioning container. Rebuild the launcher after
-changing a toolset definition. A flake package export is optional.
+- extra linux packages for a sandbox session
+- built on demand in linux nix store, mounted read-only
+- image not rebuilt
+- example: `toolsets/re/default.nix`
 
-Host-specific toolsets can also be registered with
-`programs.pi.sandboxToolsets.<name> = /path/to/toolset;`; these merge with the
-catalog defaults.
+### add one
 
-## RE tools
+- create `toolsets/NAME/default.nix`
+- takes `nixpkgsRev`, returns `aarch64-linux` package with `bin` dir
+- name matches `[a-zA-Z0-9][a-zA-Z0-9_-]*`
+- keep supporting files inside its directory
+- register in `toolsets/default.nix`
+- `git add -N pkgs/pi-sandbox/toolsets/NAME`
+- `luca build`
+- rebuild after any toolset change, definitions copied in at build time
+- host-specific: `programs.pi.sandboxToolsets.NAME = /path`
 
-The `re` toolset contains Ghidra, jadx, radare2, and ipsw and is also exported as
-`packages.aarch64-linux.re-tools` by the personal flake.
+### re
 
-Use `ghidra-analyzeHeadless` for Ghidra automation. Launching the GUI requires a
-display setup. Writable projects and output belong in `/workspace` or `/tmp`.
-
-JADX includes its decompiler and GUI, with optional Quark Engine integration
-omitted to avoid its large Python/analytics dependency tree. Its build uses
-bounded Gradle/Kotlin memory to support the small Linux VM.
+- ghidra, jadx, radare2, ipsw
+- headless ghidra: `ghidra-analyzeHeadless`
+- also exported as `packages.aarch64-linux.re-tools`
