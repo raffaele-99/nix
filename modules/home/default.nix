@@ -4,6 +4,7 @@
     ./shell.nix
     ./docker.nix
     ./editor.nix
+    ./glow.nix
     ./rectangle.nix
     ./luca.nix
     ./pi.nix
