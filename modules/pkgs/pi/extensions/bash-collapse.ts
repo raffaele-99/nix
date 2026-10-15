@@ -1,7 +1,25 @@
 import type { BashToolInput, ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, visibleWidth } from "@earendil-works/pi-tui";
 
 const PROMPT = "$ ";
+
+const segmenter = new Intl.Segmenter();
+
+// truncateToWidth always emits a full SGR reset (\x1b[0m) around the ellipsis, which cuts off the
+// tool box's background colour mid-row. Truncate the plain text ourselves so no resets are emitted.
+function truncatePlain(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (visibleWidth(text) <= maxWidth) return text;
+  let out = "";
+  let used = 0;
+  for (const { segment } of segmenter.segment(text)) {
+    const w = visibleWidth(segment);
+    if (used + w > maxWidth - 1) break;
+    out += segment;
+    used += w;
+  }
+  return `${out}…`;
+}
 
 function collapsedCall(theme: Theme, command: string, timeout: number | undefined): Component {
   const [firstLine, ...hiddenLines] = command.trim().replaceAll("\t", "   ").split(/\r?\n/);
@@ -13,9 +31,8 @@ function collapsedCall(theme: Theme, command: string, timeout: number | undefine
 
   return {
     render(width) {
-      const shownCommand = truncateToWidth(firstLine, width - visibleWidth(PROMPT + suffix), "…");
-      const line = theme.fg("toolTitle", theme.bold(PROMPT + shownCommand)) + theme.fg("muted", suffix);
-      return [truncateToWidth(line, width, "…")];
+      const shownCommand = truncatePlain(firstLine, width - visibleWidth(PROMPT + suffix));
+      return [theme.fg("toolTitle", theme.bold(PROMPT + shownCommand)) + theme.fg("muted", suffix)];
     },
     invalidate() {},
   };
@@ -37,7 +54,7 @@ function statusLabel(result: { content: { type: string; text?: string }[] }, isE
 function collapsedResult(theme: Theme, label: { text: string; ok: boolean }): Component {
   return {
     render(width) {
-      return [truncateToWidth(theme.fg(label.ok ? "success" : "error", label.text), width, "…")];
+      return [theme.fg(label.ok ? "success" : "error", truncatePlain(label.text, width))];
     },
     invalidate() {},
   };
