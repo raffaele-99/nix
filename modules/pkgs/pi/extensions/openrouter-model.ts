@@ -140,8 +140,16 @@ function perMillion(price: string | undefined): number {
 }
 
 function formatPrice(pricing: Record<string, string | undefined> | undefined): string {
-	const format = (value: number) => (value === 0 ? "0" : value >= 100 ? value.toFixed(0) : value.toFixed(2));
-	return `$${format(perMillion(pricing?.prompt))}/${format(perMillion(pricing?.completion))}`;
+	const format = (value: number) =>
+		value === 0
+			? "0"
+			: value >= 100
+				? value.toFixed(0)
+				: value >= 0.01
+					? value.toFixed(2)
+					: String(Number(value.toPrecision(2)));
+	const cacheRead = pricing?.input_cache_read === undefined ? "-" : format(perMillion(pricing.input_cache_read));
+	return `$${format(perMillion(pricing?.prompt))}/${format(perMillion(pricing?.completion))}/${cacheRead}`;
 }
 
 function formatTokens(tokens: number | null | undefined): string {
@@ -529,7 +537,7 @@ export default function (pi: ExtensionAPI) {
 		}));
 		return pick(ctx, {
 			title: "OpenRouter model",
-			subtitle: "context · $ per 1M input/output tokens",
+			subtitle: "context · $ per 1M input/output/cache read tokens",
 			items: () => items,
 			query,
 			hint: "type to search · ↑↓ move · enter providers · esc cancel",
@@ -622,7 +630,7 @@ export default function (pi: ExtensionAPI) {
 
 		return pick(ctx, {
 			title: `${model.id} providers`,
-			subtitle: "endpoint · quant · $ per 1M input/output · context · uptime (30m) · green: fp8+, no training or retention",
+			subtitle: "endpoint · quant · $ per 1M input/output/cache read · context · uptime (30m) · green: fp8+, no training or retention",
 			filters: [ALL_QUANTS, ...quants],
 			items,
 			hint: "type to search · ↑↓ move · tab quant · enter pin · esc back",
