@@ -478,6 +478,12 @@ let
         copy_agent_item "$name"
       done
 
+      # Sandbox-only guideline, added to the container's copy of SYSTEM.md.
+      if [[ -f "$agent_dir/SYSTEM.md" ]]; then
+        chmod u+w "$agent_dir/SYSTEM.md"
+        sed -i '/<\/guidelines>/i - You can use `uv` if you need pip packages.' "$agent_dir/SYSTEM.md"
+      fi
+
       if $no_cwd; then
         install -m 0444 ${./no-cwd.ts} "$agent_dir/no-cwd.ts"
         pi_args=(-e /root/.pi/agent/no-cwd.ts "''${pi_args[@]}")
