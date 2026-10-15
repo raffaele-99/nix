@@ -23,6 +23,26 @@ function collapsedCall(theme: Theme, command: string, timeout: number | undefine
 
 const emptyResult: Component = { render: () => [], invalidate() {} };
 
+// The bash tool exposes no exit code to renderers; non-zero exits and failures only appear as a trailing status line in the text.
+function statusLabel(result: { content: { type: string; text?: string }[] }, isError: boolean): { text: string; ok: boolean } {
+  if (!isError) return { text: "exit 0", ok: true };
+  const text = result.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("\n");
+  const code = text.match(/Command exited with code (-?\d+)\s*$/);
+  if (code) return { text: `exit ${code[1]}`, ok: false };
+  if (/Command aborted\s*$/.test(text)) return { text: "aborted", ok: false };
+  if (/Command timed out after \d+ seconds\s*$/.test(text)) return { text: "timed out", ok: false };
+  return { text: "failed", ok: false };
+}
+
+function collapsedResult(theme: Theme, label: { text: string; ok: boolean }): Component {
+  return {
+    render(width) {
+      return [truncateToWidth(theme.fg(label.ok ? "success" : "error", label.text), width, "…")];
+    },
+    invalidate() {},
+  };
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerToolRenderer((toolName, next) => {
     const renderers = next();
@@ -48,7 +68,9 @@ export default function (pi: ExtensionAPI) {
           lastComponent: context.state.fullResult,
         });
         context.state.fullResult = fullResult;
-        return context.expanded ? fullResult : emptyResult;
+        if (context.expanded) return fullResult;
+        if (options.isPartial) return emptyResult;
+        return collapsedResult(theme, statusLabel(result, context.isError));
       },
     };
   });
