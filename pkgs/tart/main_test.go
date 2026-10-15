@@ -94,6 +94,43 @@ func TestInformationWithoutVolume(t *testing.T) {
 	}
 }
 
+func TestExpandLatestCreateShorthand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "latest image",
+			args: []string{"create", "latest", "golden-gate"},
+			want: []string{"create", "--from-ipsw=latest", "--disk-size=40", "golden-gate"},
+		},
+		{
+			name: "ordinary create",
+			args: []string{"create", "golden-gate"},
+			want: []string{"create", "golden-gate"},
+		},
+		{
+			name: "incomplete shorthand",
+			args: []string{"create", "latest"},
+			want: []string{"create", "latest"},
+		},
+		{
+			name: "create with additional options",
+			args: []string{"create", "latest", "golden-gate", "--disk-size=80"},
+			want: []string{"create", "latest", "golden-gate", "--disk-size=80"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := expandShorthand(test.args); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("expanded arguments = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestExecPreservesArgumentsAndStatus(t *testing.T) {
 	volume := filepath.Join(t.TempDir(), "unmounted drive")
 	script := filepath.Join(t.TempDir(), "upstream tart")
