@@ -319,18 +319,6 @@ export default function (pi: ExtensionAPI) {
 		return box;
 	});
 
-	// Core user and assistant messages do not display their role. Add a compact
-	// label without changing the text stored in the session or sent to the model.
-	pi.registerMarkdownTransformer((markdown, { messageType }) => {
-		const label =
-			messageType === "user"
-				? "role: user · response required"
-				: messageType === "assistant-thinking"
-					? "role: assistant · thinking"
-					: "role: assistant";
-		return `\`${label}\`\n\n${markdown}`;
-	});
-
 	// Custom messages normally become user messages. Convert controlled messages
 	// to the closest Pi transcript role and tag them so the final provider hook
 	// can enforce the exact requested wire role after adapter normalization.
@@ -395,7 +383,6 @@ export default function (pi: ExtensionAPI) {
 	// CLI extension flags are resolved before session_start. Registering the
 	// shortcuts here lets their flags determine the bindings.
 	pi.on("session_start", (_event, ctx) => {
-		ctx.ui.setHiddenThinkingLabel("role: assistant · thinking");
 		const configuredContextShortcut = pi.getFlag("context-message-key");
 		const contextShortcut =
 			typeof configuredContextShortcut === "string" && configuredContextShortcut.trim()
