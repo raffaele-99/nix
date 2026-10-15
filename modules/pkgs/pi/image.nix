@@ -143,6 +143,7 @@ let
     pkgs.gnugrep
     pkgs.gnused
     pkgs.gawk
+    pkgs.which
     pkgs.git
     pkgs.curl
     pkgs.wget
