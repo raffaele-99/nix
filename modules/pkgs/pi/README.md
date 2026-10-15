@@ -49,7 +49,7 @@ everything else passes through to pi
 - name matches `[a-zA-Z0-9][a-zA-Z0-9_-]*`
 - keep supporting files inside its directory
 - register in `toolsets/default.nix`
-- `git add -N pkgs/pi-sandbox/toolsets/NAME`
+- `git add -N modules/pkgs/pi/toolsets/NAME`
 - `luca build`
 - rebuild after any toolset change, definitions copied in at build time
 - host-specific: `programs.pi.sandboxToolsets.NAME = /path`

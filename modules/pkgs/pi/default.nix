@@ -15,7 +15,7 @@
   nixpkgsRev,
   onePasswordCli,
   realPi,
-  bxs ? callPackage ../bxs { },
+  bxs ? callPackage ../../../pkgs/bxs { },
   sandboxToolsets ? import ./toolsets,
 }:
 assert lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (
