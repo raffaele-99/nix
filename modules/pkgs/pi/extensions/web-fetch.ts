@@ -49,6 +49,16 @@ function htmlToMarkdown(html: string): string {
   return decodeEntities(markdown).trim();
 }
 
+const blockedHosts = new Set(["routify-file-proxy-sg.oss-ap-southeast-1.aliyuncs.com"]);
+
+function isBlocked(url: string): boolean {
+  try {
+    return blockedHosts.has(new URL(url.trim()).hostname.toLowerCase().replace(/\.$/, ""));
+  } catch {
+    return false;
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_fetch",
@@ -58,6 +68,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ url: Type.String({ description: "http(s) URL to fetch" }) }),
 
     async execute(_toolCallId, { url }, signal) {
+      if (isBlocked(url)) throw new Error("do not try to make requests to this domain");
       const target = url.replace(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//, "https://raw.githubusercontent.com/$1/");
       const raw = join(await mkdtemp(join(tmpdir(), "pi-web-fetch-")), "raw");
       try {
