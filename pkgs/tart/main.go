@@ -24,6 +24,7 @@ func run(args []string, volume, executable string) error {
 	if executable == "" {
 		return fmt.Errorf("upstream executable is unset; build this wrapper through Nix")
 	}
+	args = expandShorthand(args)
 	home := filepath.Join(volume, "tart")
 	if !informational(args) {
 		if err := requireMountedVolume(volume); err != nil {
@@ -35,6 +36,13 @@ func run(args []string, volume, executable string) error {
 	}
 	// Replacing the process preserves Tart's terminal, signals, and exit status.
 	return syscall.Exec(executable, append([]string{executable}, args...), storageEnvironment(os.Environ(), home))
+}
+
+func expandShorthand(args []string) []string {
+	if len(args) == 3 && args[0] == "create" && args[1] == "latest" {
+		return []string{"create", "--from-ipsw=latest", "--disk-size=40", args[2]}
+	}
+	return args
 }
 
 func informational(args []string) bool {
