@@ -33,12 +33,12 @@ in
 
     home.file = {
       ".pi/agent/SYSTEM.md".source = ../../../pkgs/pi/SYSTEM.md;
-      ".pi/agent/extensions/bare-tools.ts".source = ../../../pkgs/pi/extensions/bare-tools.ts;
       ".pi/agent/extensions/bash-collapse.ts".source = ../../../pkgs/pi/extensions/bash-collapse.ts;
       ".pi/agent/extensions/compact-tools.ts".source = ../../../pkgs/pi/extensions/compact-tools.ts;
       ".pi/agent/extensions/context-message.ts".source = ../../../pkgs/pi/extensions/context-message.ts;
       ".pi/agent/extensions/footer.ts".source = ../../../pkgs/pi/extensions/footer.ts;
       ".pi/agent/extensions/goal.ts".source = ../../../pkgs/pi/extensions/goal.ts;
+      ".pi/agent/extensions/gradient-tools.ts".source = ../../../pkgs/pi/extensions/gradient-tools.ts;
       ".pi/agent/extensions/openrouter-model.ts".source = ../../../pkgs/pi/extensions/openrouter-model.ts;
       ".pi/agent/extensions/save.ts".source = ../../../pkgs/pi/extensions/save.ts;
       ".pi/agent/extensions/subagent.ts".source = ../../../pkgs/pi/extensions/subagent.ts;
