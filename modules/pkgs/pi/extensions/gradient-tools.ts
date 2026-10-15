@@ -3,13 +3,18 @@ import { backgroundAnsi, type Color, colorToHex, mixColors, visibleWidth } from 
 
 const ORIGINAL_RENDER = Symbol.for("gradient-tools.originalRender");
 const RESET_BACKGROUND = "\x1b[49m";
-// CSI sequences, and OSC/APC/DCS strings terminated by BEL or ST.
-const ESCAPE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|[\]_P^X][^\x07\x1b]*(?:\x07|\x1b\\))/y;
+const CSI = String.raw`\[[0-?]*[ -/]*[@-~]`;
+const STRING_COMMAND = String.raw`[\]_P^X][^\x07\x1b]*`;
+const BEL_OR_ST = String.raw`(?:\x07|\x1b\\)`;
+const ESCAPE_SEQUENCE = new RegExp(String.raw`\x1b(?:${CSI}|${STRING_COMMAND}${BEL_OR_ST})`, "y");
 const GRAPHICS_LINE = /\x1b_G|\x1b\]1337;/;
 const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
+const TAB_AS_SPACES = "   ";
 
-/** Tint opacity at a position 0 (left edge) to 1 (right edge). */
-const fade = (t: number) => (1 - t) ** 1.6;
+const FADE_EXPONENT = 1.6;
+const MAX_CACHED_RAMPS = 64;
+const TERMINAL_DEFAULT = "";
+const EXTENDED_COLOR_CODES = new Set([38, 48, 58]);
 
 type GradientTool = {
   isPartial: boolean;
@@ -20,20 +25,24 @@ type GradientTool = {
   render(width: number): string[];
 };
 
+type BackgroundChange = "set" | "cleared" | "unchanged";
+
 const graphemes = new Intl.Segmenter();
 const ramps = new Map<string, string[]>();
 const paintCaches = new WeakMap<object, { ramp: string[]; lines: Map<string, string> }>();
 
-// Theme resolves tokens set to "" from the terminal's reported default colors (or a light/dark guess),
-// so a theme whose only background is "" reads the real terminal background.
-let backgroundProbe: Theme | undefined;
-function terminalBackground(): Color {
-  backgroundProbe ??= new Theme(
-    { text: "", muted: "", thinkingXhigh: "" } as never,
-    { selectedBg: "" } as never,
+function tintStrength(fractionAcross: number): number {
+  return (1 - fractionAcross) ** FADE_EXPONENT;
+}
+
+let terminalDefaultsTheme: Theme | undefined;
+function terminalDefaultBackground(): Color {
+  terminalDefaultsTheme ??= new Theme(
+    { text: TERMINAL_DEFAULT, muted: TERMINAL_DEFAULT, thinkingXhigh: TERMINAL_DEFAULT } as never,
+    { selectedBg: TERMINAL_DEFAULT } as never,
     "truecolor",
   );
-  return backgroundProbe.colors.selectedBg;
+  return terminalDefaultsTheme.colors.selectedBg;
 }
 
 function statusBackground(tool: GradientTool): ThemeBg {
@@ -41,55 +50,67 @@ function statusBackground(tool: GradientTool): ThemeBg {
   return tool.result?.isError ? "toolErrorBg" : "toolSuccessBg";
 }
 
-/** Background escape per column, fading from the status tint into the terminal background. */
-function fadeRamp(theme: Theme, token: ThemeBg, width: number): string[] {
+function fadingBackgroundPerColumn(theme: Theme, token: ThemeBg, width: number): string[] {
   const mode = theme.getColorMode();
   const tint = theme.colors[token];
-  const background = terminalBackground();
+  const background = terminalDefaultBackground();
   const key = `${colorToHex(tint)}>${colorToHex(background)}|${width}|${mode}`;
   const cached = ramps.get(key);
   if (cached) return cached;
 
-  // 256 colors cannot express a smooth fade; use the plain tint rather than visible bands.
-  const ramp =
-    mode === "truecolor"
-      ? Array.from({ length: width }, (_, column) =>
-          backgroundAnsi(mixColors(background, tint, fade(column / Math.max(1, width - 1)), "srgb"), mode),
-        )
-      : Array<string>(width).fill(theme.getBgAnsi(token));
-  if (ramps.size > 64) ramps.clear();
+  const supportsSmoothFade = mode === "truecolor";
+  const ramp = supportsSmoothFade
+    ? Array.from({ length: width }, (_, column) =>
+        backgroundAnsi(mixColors(background, tint, tintStrength(column / Math.max(1, width - 1)), "srgb"), mode),
+      )
+    : Array<string>(width).fill(theme.getBgAnsi(token));
+  if (ramps.size > MAX_CACHED_RAMPS) ramps.clear();
   ramps.set(key, ramp);
   return ramp;
 }
 
-/** Whether an SGR sequence sets (true) or clears (false) the background, or leaves it alone. */
-function backgroundChange(sgr: string): boolean | undefined {
+function isBackgroundSet(code: number): boolean {
+  return (code >= 40 && code <= 47) || (code >= 100 && code <= 107) || code === 48;
+}
+
+function isBackgroundReset(code: number): boolean {
+  return code === 0 || code === 49;
+}
+
+function extendedColorArgumentCount(colorSpace: string | undefined): number {
+  if (colorSpace === "5") return 2;
+  if (colorSpace === "2") return 4;
+  return 0;
+}
+
+function sgrBackgroundChange(sgr: string): BackgroundChange {
   const params = sgr.slice(2, -1);
-  if (params === "") return false;
-  let change: boolean | undefined;
+  if (params === "") return "cleared";
+  let change: BackgroundChange = "unchanged";
   const parts = params.split(";");
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     const code = Number.parseInt(part, 10) || 0;
-    if (code === 0 || code === 49) change = false;
-    else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107) || code === 48) change = true;
-    // Skip extended color arguments so 38;5;41 is not read as a background.
-    if ((code === 38 || code === 48 || code === 58) && !part.includes(":")) {
-      i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
-    }
+    if (isBackgroundReset(code)) change = "cleared";
+    else if (isBackgroundSet(code)) change = "set";
+    const hasSemicolonArguments = EXTENDED_COLOR_CODES.has(code) && !part.includes(":");
+    if (hasSemicolonArguments) i += extendedColorArgumentCount(parts[i + 1]);
   }
   return change;
 }
 
-/** Paint the ramp under every cell of the line, padded to the full width. Content backgrounds win. */
-function paint(line: string, width: number, ramp: string[]): string {
+function isSgr(sequence: string): boolean {
+  return sequence.startsWith("\x1b[") && sequence.endsWith("m");
+}
+
+function paintBehindContent(line: string, width: number, ramp: string[]): string {
   let out = "";
   let column = 0;
   let current: string | undefined;
-  let ownBackground = false;
+  let contentHasBackground = false;
 
   const cell = (text: string, cellWidth: number) => {
-    if (!ownBackground && cellWidth > 0) {
+    if (!contentHasBackground && cellWidth > 0) {
       const bg = ramp[Math.min(column, ramp.length - 1)];
       if (bg !== current) out += current = bg;
     }
@@ -100,23 +121,21 @@ function paint(line: string, width: number, ramp: string[]): string {
   let i = 0;
   while (i < line.length) {
     if (line.charCodeAt(i) === 0x1b) {
-      ESCAPE.lastIndex = i;
-      const code = ESCAPE.exec(line)?.[0] ?? "\x1b";
-      out += code;
-      i += code.length;
-      if (code.startsWith("\x1b[") && code.endsWith("m")) {
-        const change = backgroundChange(code);
-        if (change !== undefined) {
-          ownBackground = change;
-          current = undefined;
-        }
+      ESCAPE_SEQUENCE.lastIndex = i;
+      const sequence = ESCAPE_SEQUENCE.exec(line)?.[0] ?? "\x1b";
+      out += sequence;
+      i += sequence.length;
+      const change = isSgr(sequence) ? sgrBackgroundChange(sequence) : "unchanged";
+      if (change !== "unchanged") {
+        contentHasBackground = change === "set";
+        current = undefined;
       }
       continue;
     }
 
     let end = line.indexOf("\x1b", i);
     if (end === -1) end = line.length;
-    const text = line.slice(i, end).replaceAll("\t", "   ");
+    const text = line.slice(i, end).replaceAll("\t", TAB_AS_SPACES);
     i = end;
     if (PRINTABLE_ASCII.test(text)) {
       for (const char of text) cell(char, 1);
@@ -125,7 +144,7 @@ function paint(line: string, width: number, ramp: string[]): string {
     }
   }
 
-  ownBackground = false;
+  contentHasBackground = false;
   while (column < width) cell(" ", 1);
   return out + RESET_BACKGROUND;
 }
@@ -160,18 +179,19 @@ export default function (pi: ExtensionAPI) {
     }
 
     const lines = originalRender.call(this, width - 2 * pad);
-    // Line 0 is the blank spacer above the tool; images follow the self-rendered content.
-    const start = lines[0] === "" ? 1 : 0;
-    const end = start + (this.selfRenderHeight ?? lines.length);
-    const ramp = fadeRamp(theme, statusBackground(this), width);
+    const hasSpacerLine = lines[0] === "";
+    const contentStart = hasSpacerLine ? 1 : 0;
+    const contentEnd = contentStart + (this.selfRenderHeight ?? lines.length);
+    const ramp = fadingBackgroundPerColumn(theme, statusBackground(this), width);
     const previous = paintCaches.get(this);
     const cached = previous?.ramp === ramp ? previous.lines : undefined;
     const painted = new Map<string, string>();
     const padding = " ".repeat(pad);
 
     const result = lines.map((line, index) => {
-      if (index < start || index >= end || GRAPHICS_LINE.test(line)) return line;
-      const output = cached?.get(line) ?? paint(padding + line, width, ramp);
+      const isToolContent = index >= contentStart && index < contentEnd;
+      if (!isToolContent || GRAPHICS_LINE.test(line)) return line;
+      const output = cached?.get(line) ?? paintBehindContent(padding + line, width, ramp);
       painted.set(line, output);
       return output;
     });
