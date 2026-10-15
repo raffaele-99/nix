@@ -127,6 +127,8 @@ let
     '';
   };
 
+  pythonWithPip = pkgs.python3.withPackages (ps: [ ps.pip ]);
+
   imagePackages = [
     containerEntrypoint
     opBridgeClient
@@ -146,7 +148,8 @@ let
     pkgs.wget
     pkgs.jq
     pkgs.ripgrep
-    pkgs.python3
+    pythonWithPip
+    pkgs.uv
     pkgs.socat
     pkgs.fakeNss
   ];
@@ -165,7 +168,12 @@ let
       WorkingDir = "/workspace";
       Env = [
         "HOME=/root"
-        "PATH=${lib.makeBinPath imagePackages}"
+        "PATH=/root/.cache/python/bin:${lib.makeBinPath imagePackages}"
+        # The root filesystem is read-only, so installs go to the /root/.cache tmpfs
+        # (lost on exit). Use the nix python rather than downloading unpatched ones.
+        "PYTHONUSERBASE=/root/.cache/python"
+        "UV_PYTHON_DOWNLOADS=never"
+        "UV_TOOL_BIN_DIR=/root/.cache/python/bin"
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       ];
