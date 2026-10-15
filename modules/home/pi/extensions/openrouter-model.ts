@@ -47,6 +47,18 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_VISIBLE_ROWS = 12;
 const MAX_LABEL_WIDTH = 44;
 const ALL_QUANTS = "all";
+const MODEL_PAGE = "https://openrouter.ai/";
+const USER_AGENT =
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36";
+const CONTEXT_TOKENS = 100_000;
+const EMPIRICAL_INPUT_TOKENS = 32_350;
+const EMPIRICAL_OUTPUT_TOKENS = 25_030;
+const EMPIRICAL_CALLS = 31;
+const GROWTH_PER_CALL = (EMPIRICAL_INPUT_TOKENS + EMPIRICAL_OUTPUT_TOKENS) / EMPIRICAL_CALLS;
+const INPUT_SHARE = EMPIRICAL_INPUT_TOKENS / (EMPIRICAL_INPUT_TOKENS + EMPIRICAL_OUTPUT_TOKENS);
+const MIN_QUANT_BITS = 8;
+
+type ScrapedEndpoint = Record<string, any>;
 
 type OpenRouterModel = {
 	id: string;
@@ -83,6 +95,7 @@ type PickerItem<T> = {
 	detail?: string;
 	note?: string;
 	current?: boolean;
+	highlight?: boolean;
 	search: string;
 };
 
@@ -148,6 +161,105 @@ function columns(rows: string[][]): string[] {
 	return rows.map((row) =>
 		row.map((cell, index) => (index === row.length - 1 ? cell : cell.padEnd(widths[index] ?? 0))).join("  "),
 	);
+}
+
+function quantBits(quant: unknown): number | null {
+	if (typeof quant !== "string" || quant.length === 0) return null;
+	const match = /^(?:fp|bf|int)(\d+)/.exec(quant.toLowerCase());
+	return match ? Number(match[1]) : null;
+}
+
+function estimatedCost(inputPerM: number, outputPerM: number, cacheReadPerM: number): number {
+	const turns = CONTEXT_TOKENS / GROWTH_PER_CALL;
+	const cacheTokens = (CONTEXT_TOKENS * (turns - 1)) / 2;
+	const inputTokens = INPUT_SHARE * CONTEXT_TOKENS;
+	const outputTokens = (1 - INPUT_SHARE) * CONTEXT_TOKENS;
+	const cachePrice = cacheReadPerM || inputPerM;
+	return (cachePrice * cacheTokens + inputPerM * inputTokens + outputPerM * outputTokens) / 1e6;
+}
+
+function matchBracket(text: string, start: number): string {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = start; i < text.length; i++) {
+		const char = text[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (char === "\\") escaped = true;
+			else if (char === '"') inString = false;
+		} else if (char === '"') {
+			inString = true;
+		} else if (char === "[") {
+			depth++;
+		} else if (char === "]") {
+			depth--;
+			if (depth === 0) return text.slice(start, i + 1);
+		}
+	}
+	throw new Error("unbalanced brackets while parsing flight payload");
+}
+
+function flightPayload(html: string): string {
+	let flight = "";
+	for (const match of html.matchAll(/self\.__next_f\.push\(\[1,("[\s\S]*?")\]\)/g)) {
+		try {
+			flight += JSON.parse(match[1]);
+		} catch {}
+	}
+	return flight;
+}
+
+function findStatsArray(flight: string): ScrapedEndpoint[] | null {
+	const anchor = flight.indexOf('"stats":{"endpoint_id"');
+	if (anchor === -1) return null;
+	const keyIndex = flight.lastIndexOf('"state":{"data":[', anchor);
+	if (keyIndex === -1) return null;
+	const array = JSON.parse(matchBracket(flight, flight.indexOf("[", keyIndex)));
+	const first = Array.isArray(array) ? array[0] : undefined;
+	return isRecord(first) && "data_policy" in first && "stats" in first ? (array as ScrapedEndpoint[]) : null;
+}
+
+function extractEndpoints(html: string, model: string): ScrapedEndpoint[] {
+	const flight = flightPayload(html);
+	const stats = findStatsArray(flight);
+	if (stats) return stats;
+
+	const keyIndex = flight.indexOf('"variantGroups":');
+	if (keyIndex === -1) throw new Error(`no endpoint data found for ${model}`);
+	const groups = JSON.parse(matchBracket(flight, flight.indexOf("[", keyIndex))) as ScrapedEndpoint[];
+	const standard = groups.find((group) => group.variant === "standard");
+	if (!standard) throw new Error(`no standard variant group for ${model}`);
+	return standard.endpoints as ScrapedEndpoint[];
+}
+
+function rankCleanEndpoints(endpoints: ScrapedEndpoint[]): string[] {
+	const ranked: { tag: string; cost: number }[] = [];
+	for (const endpoint of endpoints) {
+		if ((quantBits(endpoint.quantization) ?? 0) < MIN_QUANT_BITS) continue;
+
+		const policy = (endpoint.data_policy ?? {}) as { training?: unknown; retainsPrompts?: unknown };
+		if (policy.training || policy.retainsPrompts) continue;
+
+		if (typeof endpoint.provider_slug !== "string" || !endpoint.provider_slug) continue;
+		const pricing = endpoint.pricing as Record<string, string | undefined> | undefined;
+		const cost = estimatedCost(
+			perMillion(pricing?.prompt),
+			perMillion(pricing?.completion),
+			perMillion(pricing?.input_cache_read),
+		);
+		ranked.push({ tag: endpoint.provider_slug, cost });
+	}
+	return ranked.sort((a, b) => a.cost - b.cost).map((row) => row.tag);
+}
+
+async function fetchCleanEndpoints(model: string, signal: AbortSignal): Promise<string[]> {
+	const response = await fetch(`${MODEL_PAGE}${modelPath(model)}`, {
+		headers: { "user-agent": USER_AGENT },
+		signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+	});
+	if (!response.ok) throw new Error(`OpenRouter model page returned HTTP ${response.status}`);
+	return rankCleanEndpoints(extractEndpoints(await response.text(), model));
 }
 
 function getRouting(model: Model<Api> | undefined): OpenRouterRouting | undefined {
@@ -297,7 +409,7 @@ class Picker<T> implements Component, Focusable {
 			const label = truncateToWidth(item.label, labelWidth, "…", true);
 			const detail = item.detail ? `  ${theme.fg("muted", item.detail)}` : "";
 			const note = item.note ? `  ${theme.fg("warning", item.note)}` : "";
-			lines.push(`${cursor}${marker}${isSelected ? theme.fg("accent", label) : label}${detail}${note}`);
+			lines.push(`${cursor}${marker}${isSelected ? theme.fg("accent", label) : item.highlight ? theme.fg("success", label) : label}${detail}${note}`);
 		}
 		if (this.visible.length === 0) lines.push(theme.fg("muted", "  No matches"));
 		else if (start > 0 || end < this.visible.length) {
@@ -424,7 +536,12 @@ export default function (pi: ExtensionAPI) {
 		});
 	};
 
-	const pickEndpoint = (ctx: ExtensionContext, model: OpenRouterModel, endpoints: OpenRouterEndpoint[]) => {
+	const pickEndpoint = (
+		ctx: ExtensionContext,
+		model: OpenRouterModel,
+		endpoints: OpenRouterEndpoint[],
+		cleanTags: string[],
+	) => {
 		const isCurrentModel = ctx.model?.provider === PROVIDER && ctx.model.id === model.id;
 		const currentRouting = isCurrentModel ? getRouting(ctx.model) : undefined;
 		const quantOf = (endpoint: OpenRouterEndpoint) => endpoint.quantization || "unknown";
@@ -442,6 +559,31 @@ export default function (pi: ExtensionAPI) {
 		const quants = [...counts.entries()]
 			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
 			.map(([quant]) => quant);
+
+		const endpointCells = (endpoint: OpenRouterEndpoint) => [
+			endpoint.tag,
+			quantOf(endpoint),
+			formatPrice(endpoint.pricing),
+			formatTokens(endpoint.context_length),
+			endpoint.uptime_last_30m === null ? "up ?" : `up ${Math.floor(endpoint.uptime_last_30m)}%`,
+		];
+		const clean = new Set(cleanTags);
+		const bestEndpoint = cleanTags
+			.map((tag) => sorted.find((endpoint) => endpoint.tag === tag))
+			.find((endpoint) => endpoint && supportsTools(endpoint));
+		const isPinnedTo = (endpoint: OpenRouterEndpoint) =>
+			isCurrentModel && sameEndpoints(currentRouting, [endpoint.tag]);
+		const endpointItem = (endpoint: OpenRouterEndpoint, detail: string | undefined): PickerItem<Route> => ({
+			value: { routing: { only: [endpoint.tag], allow_fallbacks: false }, label: endpoint.tag },
+			label: endpoint.provider_name,
+			detail,
+			note:
+				[!supportsTools(endpoint) && "no tools", endpoint.status < 0 && "degraded"].filter(Boolean).join(", ") ||
+				undefined,
+			current: endpoint !== bestEndpoint && isPinnedTo(endpoint),
+			highlight: clean.has(endpoint.tag),
+			search: `${endpoint.provider_name} ${endpoint.tag} ${quantOf(endpoint)}`,
+		});
 
 		const items = (filter: string | undefined): PickerItem<Route>[] => {
 			const quant = filter && filter !== ALL_QUANTS ? filter : undefined;
@@ -462,34 +604,24 @@ export default function (pi: ExtensionAPI) {
 						current: isCurrentModel && !currentRouting?.only?.length,
 						search: "auto any",
 					};
-			const details = columns(
-				matching.map((endpoint) => [
-					endpoint.tag,
-					quantOf(endpoint),
-					formatPrice(endpoint.pricing),
-					formatTokens(endpoint.context_length),
-					endpoint.uptime_last_30m === null ? "up ?" : `up ${Math.floor(endpoint.uptime_last_30m)}%`,
-				]),
-			);
-			return [
-				any,
-				...matching.map<PickerItem<Route>>((endpoint, index) => ({
-					value: { routing: { only: [endpoint.tag], allow_fallbacks: false }, label: endpoint.tag },
-					label: endpoint.provider_name,
-					detail: details[index],
-					note:
-						[!supportsTools(endpoint) && "no tools", endpoint.status < 0 && "degraded"]
-							.filter(Boolean)
-							.join(", ") || undefined,
-					current: isCurrentModel && sameEndpoints(currentRouting, [endpoint.tag]),
-					search: `${endpoint.provider_name} ${endpoint.tag} ${quantOf(endpoint)}`,
-				})),
-			];
+			const shown = bestEndpoint ? [bestEndpoint, ...matching] : matching;
+			const details = columns(shown.map(endpointCells));
+			const endpointItems = shown.map((endpoint, index) => endpointItem(endpoint, details[index]));
+			if (!bestEndpoint) return [any, ...endpointItems];
+
+			const [bestItem, ...rest] = endpointItems;
+			const best: PickerItem<Route> = {
+				...bestItem,
+				label: `best: ${bestEndpoint.provider_name}`,
+				current: isPinnedTo(bestEndpoint),
+				search: `best ${bestItem.search}`,
+			};
+			return [best, any, ...rest];
 		};
 
 		return pick(ctx, {
 			title: `${model.id} providers`,
-			subtitle: "endpoint · quant · $ per 1M input/output · context · uptime (30m)",
+			subtitle: "endpoint · quant · $ per 1M input/output · context · uptime (30m) · green: fp8+, no training or retention",
 			filters: [ALL_QUANTS, ...quants],
 			items,
 			hint: "type to search · ↑↓ move · tab quant · enter pin · esc back",
@@ -546,16 +678,29 @@ export default function (pi: ExtensionAPI) {
 				const picked = modelChoice.value;
 				if (!picked) return;
 
-				const details = await load(ctx, `Fetching ${picked.id} providers…`, (signal) =>
-					fetchOpenRouter<{ endpoints?: OpenRouterEndpoint[] }>(`/models/${modelPath(picked.id)}/endpoints`, signal),
+				const loaded = await load(ctx, `Fetching ${picked.id} providers…`, (signal) =>
+					Promise.all([
+						fetchOpenRouter<{ endpoints?: OpenRouterEndpoint[] }>(
+							`/models/${modelPath(picked.id)}/endpoints`,
+							signal,
+						),
+						fetchCleanEndpoints(picked.id, signal).catch((error: unknown) => {
+							if (!isAbortError(error)) {
+								const message = error instanceof Error ? error.message : String(error);
+								ctx.ui.notify(`OpenRouter best provider: ${message}`, "warning");
+							}
+							return [];
+						}),
+					]),
 				);
+				const [details, cleanTags = []] = loaded ?? [];
 				const endpoints = details?.endpoints ?? [];
 				if (details && endpoints.length === 0) ctx.ui.notify(`${picked.id} has no live endpoints`, "warning");
 				if (endpoints.length === 0) continue;
 
 				// Duplicate tags are separate deployments behind the same slug, so one row covers them.
 				const unique = [...new Map(endpoints.map((endpoint) => [endpoint.tag, endpoint])).values()];
-				const routeChoice = await pickEndpoint(ctx, picked, unique);
+				const routeChoice = await pickEndpoint(ctx, picked, unique, cleanTags);
 				if (!routeChoice.value) continue;
 
 				await selectRoute(ctx, picked, routeChoice.value);
