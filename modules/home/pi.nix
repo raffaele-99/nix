@@ -36,6 +36,7 @@ in
       ".pi/agent/extensions/context-message.ts".source = ./pi/extensions/context-message.ts;
       ".pi/agent/extensions/goal.ts".source = ./pi/extensions/goal.ts;
       ".pi/agent/extensions/openrouter-model.ts".source = ./pi/extensions/openrouter-model.ts;
+      ".pi/agent/extensions/web-search.ts".source = ./pi/extensions/web-search.ts;
     };
   };
 }

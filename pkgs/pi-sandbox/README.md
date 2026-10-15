@@ -15,6 +15,7 @@ macos pi wrapper to handle sandboxing and stuff
 - cwd mounted at `/workspace`, `.git` read-only
 - pi config, auth, sessions mapped in
 - read-only root, no caps, no-new-privileges
+- `web_search` goes through `bxs serve` on the host; `bx`, `bxs` and the api key stay on the host
 
 container is deleted whenever you close pi
 

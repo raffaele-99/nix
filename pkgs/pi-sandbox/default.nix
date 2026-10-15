@@ -1,5 +1,6 @@
 {
   lib,
+  callPackage,
   writeShellApplication,
   writeText,
   symlinkJoin,
@@ -14,6 +15,7 @@
   nixpkgsRev,
   onePasswordCli,
   realPi,
+  bxs ? callPackage ../bxs { },
   sandboxToolsets ? import ./toolsets,
 }:
 assert lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (
@@ -576,6 +578,16 @@ let
           --env "PI_SANDBOX_OP_TOKEN=$op_token"
         )
       fi
+
+      search_port="$(allocate_port)"
+      search_token="$(${openssl}/bin/openssl rand -hex 32)"
+      BXS_SERVE_TOKEN="$search_token" ${bxs}/bin/bxs serve --listen "127.0.0.1:$search_port" \
+        >"$session_dir/search-bridge.log" 2>&1 &
+      relay_pids+=("$!")
+      docker_args+=(
+        --env "PI_SANDBOX_SEARCH_PORT=$search_port"
+        --env "PI_SANDBOX_SEARCH_TOKEN=$search_token"
+      )
 
       if ! docker image inspect ${lib.escapeShellArg imageRef} >/dev/null 2>&1; then
         echo ":: building ${imageRef} with Docker's Linux VM" >&2
