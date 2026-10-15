@@ -33,6 +33,7 @@ in
 
     home.file = {
       ".pi/agent/SYSTEM.md".source = ../../../pkgs/pi/SYSTEM.md;
+      ".pi/agent/extensions/bash-collapse.ts".source = ../../../pkgs/pi/extensions/bash-collapse.ts;
       ".pi/agent/extensions/context-message.ts".source = ../../../pkgs/pi/extensions/context-message.ts;
       ".pi/agent/extensions/footer.ts".source = ../../../pkgs/pi/extensions/footer.ts;
       ".pi/agent/extensions/goal.ts".source = ../../../pkgs/pi/extensions/goal.ts;
