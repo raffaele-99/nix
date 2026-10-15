@@ -59,18 +59,20 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, { url }, signal) {
       try {
+        const target = url.replace(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//, "https://raw.githubusercontent.com/$1/");
         const raw = join(await mkdtemp(join(tmpdir(), "pi-web-fetch-")), "raw");
         const { stdout: type } = await execFileAsync(
           "curl",
           [
             "-sSfL",
+            "--globoff",
             "--max-time", "30",
             "--max-filesize", String(25 * 1024 * 1024),
             "--proto", "=http,https",
             "--proto-redir", "=http,https",
             "-o", raw,
             "-w", "%{content_type}",
-            "--", url,
+            "--", target,
           ],
           { signal },
         );
