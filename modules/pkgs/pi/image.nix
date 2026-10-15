@@ -129,6 +129,14 @@ let
 
   pythonWithPip = pkgs.python3.withPackages (ps: [ ps.pip ]);
 
+  writableCacheDir = "/root/.cache";
+  pythonUserBase = "${writableCacheDir}/python";
+  pythonEnvForReadOnlyRoot = {
+    PYTHONUSERBASE = pythonUserBase;
+    UV_TOOL_BIN_DIR = "${pythonUserBase}/bin";
+    UV_PYTHON_DOWNLOADS = "never";
+  };
+
   imagePackages = [
     containerEntrypoint
     opBridgeClient
@@ -169,13 +177,10 @@ let
       WorkingDir = "/workspace";
       Env = [
         "HOME=/root"
-        "PATH=/root/.cache/python/bin:${lib.makeBinPath imagePackages}"
-        "PYTHONUSERBASE=/root/.cache/python"
-        "UV_PYTHON_DOWNLOADS=never"
-        "UV_TOOL_BIN_DIR=/root/.cache/python/bin"
+        "PATH=${pythonUserBase}/bin:${lib.makeBinPath imagePackages}"
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-      ];
+      ] ++ lib.mapAttrsToList (name: value: "${name}=${value}") pythonEnvForReadOnlyRoot;
     };
   };
 in
