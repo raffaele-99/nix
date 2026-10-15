@@ -64,7 +64,7 @@
         ];
       };
 
-      packages.aarch64-linux.re-tools = import ./pkgs/pi-sandbox/toolsets/re {
+      packages.aarch64-linux.re-tools = import ./modules/pkgs/pi/toolsets/re {
         pkgs = nixpkgs.legacyPackages.aarch64-linux;
       };
 
@@ -75,7 +75,7 @@
       packages.aarch64-darwin.tart = darwinPkgs.callPackage ./pkgs/tart { };
       packages.aarch64-darwin.bxs = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bxs { };
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
-      packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/pi-sandbox {
+      packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/pi {
         nixpkgsRev = nixpkgs.rev;
         onePasswordCli = darwinPkgs._1password-cli;
         realPi = nixpkgs.legacyPackages.aarch64-darwin.pi-coding-agent;

@@ -6,7 +6,7 @@
   ...
 }:
 let
-  pi = pkgs.callPackage ../../pkgs/pi-sandbox {
+  pi = pkgs.callPackage ../../../pkgs/pi {
     nixpkgsRev = sharedNixpkgsRev;
     onePasswordCli = pkgs._1password-cli;
     realPi = pkgs.pi-coding-agent;
@@ -26,20 +26,20 @@ in
 
   config = {
     programs.pi.sandboxToolsets = lib.mapAttrs (_: toolset: lib.mkDefault toolset) (
-      import ../../pkgs/pi-sandbox/toolsets
+      import ../../../pkgs/pi/toolsets
     );
 
     home.packages = [ pi ];
 
     home.file = {
-      ".pi/agent/SYSTEM.md".source = ./pi/SYSTEM.md;
-      ".pi/agent/extensions/context-message.ts".source = ./pi/extensions/context-message.ts;
-      ".pi/agent/extensions/footer.ts".source = ./pi/extensions/footer.ts;
-      ".pi/agent/extensions/goal.ts".source = ./pi/extensions/goal.ts;
-      ".pi/agent/extensions/openrouter-model.ts".source = ./pi/extensions/openrouter-model.ts;
-      ".pi/agent/extensions/save.ts".source = ./pi/extensions/save.ts;
-      ".pi/agent/extensions/subagent.ts".source = ./pi/extensions/subagent.ts;
-      ".pi/agent/extensions/web-search.ts".source = ./pi/extensions/web-search.ts;
+      ".pi/agent/SYSTEM.md".source = ../../../pkgs/pi/SYSTEM.md;
+      ".pi/agent/extensions/context-message.ts".source = ../../../pkgs/pi/extensions/context-message.ts;
+      ".pi/agent/extensions/footer.ts".source = ../../../pkgs/pi/extensions/footer.ts;
+      ".pi/agent/extensions/goal.ts".source = ../../../pkgs/pi/extensions/goal.ts;
+      ".pi/agent/extensions/openrouter-model.ts".source = ../../../pkgs/pi/extensions/openrouter-model.ts;
+      ".pi/agent/extensions/save.ts".source = ../../../pkgs/pi/extensions/save.ts;
+      ".pi/agent/extensions/subagent.ts".source = ../../../pkgs/pi/extensions/subagent.ts;
+      ".pi/agent/extensions/web-search.ts".source = ../../../pkgs/pi/extensions/web-search.ts;
     };
   };
 }

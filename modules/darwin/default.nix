@@ -51,8 +51,7 @@ in
       useUserPackages = true;
       users.${cfg.username} = {
         disabledModules =
-          lib.optional (!cfg.colima.enable) ../home/docker.nix
-          ++ lib.optional (!cfg.pi.enable) ../home/pi.nix;
+          lib.optional (!cfg.colima.enable) ../home/docker.nix ++ lib.optional (!cfg.pi.enable) ../home/ai/pi;
 
         home.username = cfg.username;
         home.homeDirectory = homeDirectory;
