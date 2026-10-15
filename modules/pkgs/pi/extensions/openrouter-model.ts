@@ -546,10 +546,12 @@ export default function (pi: ExtensionAPI) {
 		const currentRouting = isCurrentModel ? getRouting(ctx.model) : undefined;
 		const quantOf = (endpoint: OpenRouterEndpoint) => endpoint.quantization || "unknown";
 		const supportsTools = (endpoint: OpenRouterEndpoint) => endpoint.supported_parameters?.includes("tools") ?? true;
+		const clean = new Set(cleanTags);
 
-		// Usable endpoints first, then cheapest input price.
+		// Clean endpoints first, then usable ones, then cheapest input price.
 		const sorted = [...endpoints].sort(
 			(left, right) =>
+				Number(clean.has(right.tag)) - Number(clean.has(left.tag)) ||
 				Number(supportsTools(right)) - Number(supportsTools(left)) ||
 				Number(right.status >= 0) - Number(left.status >= 0) ||
 				perMillion(left.pricing?.prompt) - perMillion(right.pricing?.prompt),
@@ -567,7 +569,6 @@ export default function (pi: ExtensionAPI) {
 			formatTokens(endpoint.context_length),
 			endpoint.uptime_last_30m === null ? "up ?" : `up ${Math.floor(endpoint.uptime_last_30m)}%`,
 		];
-		const clean = new Set(cleanTags);
 		const bestEndpoint = cleanTags
 			.map((tag) => sorted.find((endpoint) => endpoint.tag === tag))
 			.find((endpoint) => endpoint && supportsTools(endpoint));
