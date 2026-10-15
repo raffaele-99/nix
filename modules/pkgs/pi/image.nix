@@ -146,6 +146,7 @@ let
     pkgs.wget
     pkgs.jq
     pkgs.ripgrep
+    pkgs.python3
     pkgs.socat
     pkgs.fakeNss
   ];
