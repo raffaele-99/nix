@@ -3,46 +3,32 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Subscription usage for the active provider, authenticated with the OAuth
-// tokens Pi stores in auth.json:
-//  - Anthropic: the endpoint Claude Code's /usage uses.
-//  - OpenAI (ChatGPT plan): the endpoint Codex's /status uses.
-// Both are rate-limited per account across all clients, so snapshots are
-// shared on disk (see usageCachePath) to keep every instance off the limit.
 const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const OPENAI_JWT_CLAIM = "https://api.openai.com/auth";
-// OpenRouter is pay-as-you-go: this returns purchased credits and all-time usage.
+const XAI_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const OPENROUTER_CREDITS_URL = "https://openrouter.ai/api/v1/credits";
-// OpenRouter prices and balances are USD; the footer shows them in AUD.
-// Static approximation (1 USD ≈ 1.44 AUD, mid-Oct 2026) — it will drift, so
-// treat the converted figures as a rough guide, not a live quote.
 const USD_TO_AUD = 1.44;
 const AUTH_PATH = join(getAgentDir(), "auth.json");
 const USAGE_POLL_MS = 120_000;
 const USAGE_MIN_REFRESH_MS = 20_000;
 const USAGE_FETCH_TIMEOUT_MS = 8000;
 
-// Skip the network when the shared snapshot is younger than this.
 const USAGE_CACHE_FRESH_MS = 90_000;
-// 429 backoff: start here, double each failure, capped below.
 const USAGE_BACKOFF_BASE_MS = 60_000;
 const USAGE_BACKOFF_MAX_MS = 15 * 60_000;
 
-type UsageSource = "anthropic" | "openai" | "openrouter";
-const USAGE_SOURCES: UsageSource[] = ["anthropic", "openai", "openrouter"];
+type UsageSource = "anthropic" | "openai" | "openrouter" | "xai";
+const USAGE_SOURCES: UsageSource[] = ["anthropic", "openai", "openrouter", "xai"];
 
-// Provider-neutral view of one limit window.
 interface UsageWindow {
   percent: number;
-  resetsAt?: number; // epoch ms
+  resetsAt?: number;
 }
 
-// primary is the short (5h) window shown in the footer; secondary is weekly.
 interface UsageSnapshot {
   primary?: UsageWindow;
   secondary?: UsageWindow;
-  // OpenRouter has no rate-limit window; it exposes an account credit balance.
   credits?: { totalCredits: number; totalUsage: number };
 }
 
@@ -61,9 +47,7 @@ function loadUsageCache(source: UsageSource): UsageCache | undefined {
     if (parsed && typeof parsed.fetchedAt === "number" && parsed.data) {
       return parsed as UsageCache;
     }
-  } catch {
-    // No cache yet, or unreadable.
-  }
+  } catch {}
   return undefined;
 }
 
@@ -71,12 +55,9 @@ function saveUsageCache(source: UsageSource, data: UsageSnapshot): void {
   try {
     const payload: UsageCache = { data, fetchedAt: Date.now() };
     writeFileSync(usageCachePath(source), JSON.stringify(payload));
-  } catch {
-    // Best-effort; a write failure only costs a future cold start its snapshot.
-  }
+  } catch {}
 }
 
-// A distinct rate_limited result lets callers apply backoff instead of retrying.
 type UsageFetch =
   | { kind: "ok"; data: UsageSnapshot }
   | { kind: "rate_limited"; retryAfterMs: number }
@@ -92,8 +73,6 @@ function readOAuth(providerId: string): OAuthCred | undefined {
     const auth = JSON.parse(readFileSync(AUTH_PATH, "utf8"));
     const creds = auth?.[providerId];
     if (!creds || creds.type !== "oauth" || typeof creds.access !== "string") return undefined;
-    // Expired tokens just 401; Pi rewrites auth.json on its next provider
-    // request, so skip and let a later poll pick up the refreshed token.
     if (typeof creds.expires === "number" && creds.expires <= Date.now()) return undefined;
     return { access: creds.access, accountId: typeof creds.accountId === "string" ? creds.accountId : undefined };
   } catch {
@@ -101,7 +80,6 @@ function readOAuth(providerId: string): OAuthCred | undefined {
   }
 }
 
-// Stored API-key credential (optionally sourced from the provider's env var).
 function readApiKey(providerId: string, envVar: string): string | undefined {
   try {
     const auth = JSON.parse(readFileSync(AUTH_PATH, "utf8"));
@@ -109,9 +87,7 @@ function readApiKey(providerId: string, envVar: string): string | undefined {
     if (creds?.type === "api_key" && typeof creds.key === "string" && creds.key.length > 0) {
       return creds.key;
     }
-  } catch {
-    // Fall through to the environment.
-  }
+  } catch {}
   const fromEnv = process.env[envVar];
   return fromEnv && fromEnv.length > 0 ? fromEnv : undefined;
 }
@@ -130,9 +106,8 @@ async function getJson(url: string, headers: Record<string, string>): Promise<{ 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS) });
   if (!res.ok) {
     if (res.status === 429) {
-      // retry-after is in seconds and often 0/absent; callers fall back to backoff.
-      const retryAfterHeader = Number(res.headers.get("retry-after"));
-      const retryAfterMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader * 1000 : 0;
+      const retryAfterSeconds = Number(res.headers.get("retry-after"));
+      const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 0;
       return { kind: "rate_limited", retryAfterMs };
     }
     return { kind: "skip" };
@@ -140,14 +115,12 @@ async function getJson(url: string, headers: Record<string, string>): Promise<{ 
   return { kind: "ok", body: await res.json() };
 }
 
-// { utilization: 71.0, resets_at: "2026-10-07T05:00:00Z" }
 function anthropicWindow(w: any): UsageWindow | undefined {
   if (!w || typeof w.utilization !== "number") return undefined;
   const resetsAt = w.resets_at ? new Date(w.resets_at).getTime() : NaN;
   return { percent: w.utilization, resetsAt: Number.isFinite(resetsAt) ? resetsAt : undefined };
 }
 
-// { used_percent: 71, limit_window_seconds: 18000, reset_at: 1791349200 }
 function openaiWindow(w: any): UsageWindow | undefined {
   if (!w || typeof w.used_percent !== "number") return undefined;
   const resetsAt = typeof w.reset_at === "number" && w.reset_at > 0 ? w.reset_at * 1000 : undefined;
@@ -170,8 +143,6 @@ async function fetchAnthropicUsage(): Promise<UsageFetch> {
 }
 
 async function fetchOpenAIUsage(): Promise<UsageFetch> {
-  // The ChatGPT-plan login lives under "openai-codex"; the newer "Sign in with
-  // ChatGPT" credential on "openai" works too when its JWT carries an account.
   for (const providerId of ["openai-codex", "openai"]) {
     const cred = readOAuth(providerId);
     const accountId = cred && (cred.accountId ?? jwtAccountId(cred.access));
@@ -187,6 +158,23 @@ async function fetchOpenAIUsage(): Promise<UsageFetch> {
     return { kind: "ok", data: { primary: openaiWindow(rl?.primary_window), secondary: openaiWindow(rl?.secondary_window) } };
   }
   return { kind: "skip" };
+}
+
+async function fetchXaiUsage(): Promise<UsageFetch> {
+  const cred = readOAuth("xai");
+  if (!cred) return { kind: "skip" };
+  const res = await getJson(XAI_BILLING_URL, {
+    Authorization: `Bearer ${cred.access}`,
+    "X-XAI-Token-Auth": "xai-grok-cli",
+    Accept: "application/json",
+  });
+  if (res.kind !== "ok") return res;
+  const config = res.body?.config;
+  const period = config?.currentPeriod;
+  const percent = config?.creditUsagePercent ?? (period ? 0 : undefined);
+  if (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 100) return { kind: "skip" };
+  const periodEnd = new Date(period?.end ?? config?.billingPeriodEnd ?? NaN).getTime();
+  return { kind: "ok", data: { primary: { percent, resetsAt: Number.isFinite(periodEnd) ? periodEnd : undefined } } };
 }
 
 async function fetchOpenRouterCredits(): Promise<UsageFetch> {
@@ -207,9 +195,9 @@ const USAGE_FETCHERS: Record<UsageSource, () => Promise<UsageFetch>> = {
   anthropic: fetchAnthropicUsage,
   openai: fetchOpenAIUsage,
   openrouter: fetchOpenRouterCredits,
+  xai: fetchXaiUsage,
 };
 
-/** "2h13m", "18m", "3d4h" — compact time until the reset timestamp. */
 function formatUsageDelta(resetsAt: number | undefined): string | undefined {
   if (resetsAt === undefined) return undefined;
   const ms = resetsAt - Date.now();
@@ -224,21 +212,18 @@ function formatUsageDelta(resetsAt: number | undefined): string | undefined {
   return `${minutes}m`;
 }
 
-// Usage is a subscription limit, so only surface it for providers that have one.
 function usageSourceFor(model: any): UsageSource | undefined {
   if (!model) return undefined;
   const id = String(model.id ?? "").toLowerCase();
   const provider = String(model.provider ?? "").toLowerCase();
-  // Explicit providers win over the id heuristic so OpenRouter-routed Claude
-  // models (provider "openrouter", id "anthropic/claude-...") aren't misread.
   if (provider === "anthropic") return "anthropic";
   if (provider === "openai-codex" || provider === "openai") return "openai";
   if (provider === "openrouter") return "openrouter";
+  if (provider === "xai") return "xai";
   if (id.includes("claude")) return "anthropic";
   return undefined;
 }
 
-// "Usage 71% (reset 2h13m)" — 5h-window utilization and time until it resets.
 function formatUsage(data: UsageSnapshot): string | undefined {
   const w = data.primary;
   if (!w) return undefined;
@@ -246,15 +231,12 @@ function formatUsage(data: UsageSnapshot): string | undefined {
   return `Usage ${Math.round(w.percent)}%${reset ? ` (reset ${reset})` : ""}`;
 }
 
-// "A$0.060 used (A$17.77 left)" — this session's spend and the account balance
-// remaining (purchased credits minus all-time usage), converted to AUD.
 function formatOpenRouterCredit(credits: UsageSnapshot["credits"], sessionCost: number): string | undefined {
   if (!credits) return undefined;
   const remaining = credits.totalCredits - credits.totalUsage;
   return `A$${(sessionCost * USD_TO_AUD).toFixed(3)} used (A$${(remaining * USD_TO_AUD).toFixed(2)} left)`;
 }
 
-// Mirrors the built-in footer's compact token formatting.
 function formatTokens(count: number): string {
   if (count < 1000) return `${count}`;
   if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -263,7 +245,6 @@ function formatTokens(count: number): string {
   return `${Math.round(count / 1000000)}M`;
 }
 
-// Cumulative LLM cost across the whole session, mirroring the built-in footer.
 function totalCost(ctx: any): number {
   const entries = ctx.sessionManager?.getEntries?.() ?? [];
   let cost = 0;
@@ -279,7 +260,6 @@ function totalCost(ctx: any): number {
   return cost;
 }
 
-// Cache-hit rate of the most recent assistant turn on the active branch.
 function latestCacheHitRate(ctx: any): number | undefined {
   const entries = ctx.sessionManager?.getBranch?.() ?? [];
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -293,9 +273,6 @@ function latestCacheHitRate(ctx: any): number | undefined {
   return undefined;
 }
 
-// OpenRouter reports the endpoint that served a request in `openrouter_metadata`
-// on the final stream chunk (opted into by the openrouter extension). Fall back
-// to the top-level `provider` field that some responses carry.
 function routedProviderFromMetadata(data: unknown): string | undefined {
   if (!data || typeof data !== "object") return undefined;
   const chunk = data as {
@@ -317,26 +294,19 @@ function routedProviderFromMetadata(data: unknown): string | undefined {
 }
 
 export default function (pi: ExtensionAPI) {
-  // Timing for the in-flight assistant response; firstToken excludes TTFT.
   let firstToken: number | undefined;
   let tracking = false;
   let tpsText: string | undefined;
-  // Upstream OpenRouter provider that served the current response, if resolved.
   let routedProvider: string | undefined;
 
-  // Running totals for the average tok/s, reset when a new agent run starts.
   let totalOutput = 0;
   let totalGenMs = 0;
 
-  // The footer factory isn't handed an AgentSession, so it reads live state off
-  // the most recent event context captured here.
   let lastCtx: any;
   let capturedTui: { requestRender(force?: boolean): void } | undefined;
   let footerInstalled = false;
   let useStatusFallback = false;
 
-  // Background usage snapshots, one per provider, seeded from the shared
-  // on-disk cache so a last-known value shows even while a fetch is rate-limited.
   interface UsageState {
     data?: UsageSnapshot;
     fetchedAt: number;
@@ -351,13 +321,10 @@ export default function (pi: ExtensionAPI) {
   let usageTimer: ReturnType<typeof setInterval> | undefined;
   let usageTicker: ReturnType<typeof setInterval> | undefined;
 
-  // Only the active model's provider is polled.
   function activeSource(): UsageSource | undefined {
     return usageSourceFor(lastCtx?.model);
   }
 
-  // Adopt the newest on-disk snapshot (possibly from another Pi instance).
-  // Returns true when it's fresh enough to skip a network fetch.
   function adoptDiskCache(source: UsageSource): boolean {
     const st = usageState[source];
     const cache = loadUsageCache(source);
@@ -374,7 +341,6 @@ export default function (pi: ExtensionAPI) {
     const st = usageState[source];
     if (st.inFlight) return st.inFlight;
     const now = Date.now();
-    // An active 429 backoff wins even over a forced refresh.
     if (now < st.backoffUntil) {
       adoptDiskCache(source);
       return Promise.resolve();
@@ -400,7 +366,6 @@ export default function (pi: ExtensionAPI) {
         refresh();
       })
       .catch(() => {
-        // Usage display is cosmetic: never surface network/auth noise.
         adoptDiskCache(source);
       })
       .finally(() => {
@@ -414,7 +379,6 @@ export default function (pi: ExtensionAPI) {
     if (st.retryTimer) clearTimeout(st.retryTimer);
     st.retryTimer = setTimeout(() => {
       st.retryTimer = undefined;
-      // Skip if the user has since switched to another provider.
       if (activeSource() === source) void refreshUsage(source, true);
     }, afterMs + 250);
     st.retryTimer.unref?.();
@@ -428,7 +392,6 @@ export default function (pi: ExtensionAPI) {
       usageTimer = setInterval(() => void refreshUsage(activeSource(), true), USAGE_POLL_MS);
       usageTimer.unref?.();
     }
-    // Re-render between polls so the "resets in" countdown stays honest.
     if (!usageTicker) {
       usageTicker = setInterval(refresh, 30_000);
       usageTicker.unref?.();
@@ -443,9 +406,6 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // Fully custom footer: cache hit, context usage, tok/s and account usage on
-  // the left; model / provider / thinking level right-aligned. All data is read
-  // from the live extension context via the setFooter API.
   function installFooter(ctx: any) {
     if (footerInstalled || useStatusFallback) return;
     footerInstalled = true;
@@ -460,7 +420,6 @@ export default function (pi: ExtensionAPI) {
             const cacheHit = latestCacheHitRate(c);
             if (cacheHit !== undefined) parts.push(theme.fg("dim", `CH${cacheHit.toFixed(1)}%`));
 
-            // Context usage, e.g. "1045/1.0M (2.2%)".
             const usage = c.getContextUsage?.();
             const contextWindow = usage?.contextWindow ?? c.model?.contextWindow ?? 0;
             const percentValue = usage?.percent ?? 0;
@@ -473,8 +432,6 @@ export default function (pi: ExtensionAPI) {
 
             if (tpsText) parts.push(theme.fg("dim", tpsText));
 
-            // Subscription usage, e.g. "Usage 71% (reset 2h13m)", for the
-            // active model's provider only.
             const model = c.model;
             const source = usageSourceFor(model);
             const usageData = source && usageState[source].data;
@@ -494,8 +451,6 @@ export default function (pi: ExtensionAPI) {
               const level = c.thinkingLevel || "off";
               right = level === "off" ? `${modelName} • thinking off` : `${modelName} • ${level}`;
             }
-            // Prefix the resolved OpenRouter upstream provider, when one was
-            // resolved and it fits.
             if (model?.provider === "openrouter" && routedProvider) {
               const withProvider = `(${routedProvider}) ${right}`;
               if (visibleWidth(left) + 2 + visibleWidth(withProvider) <= width) {
@@ -513,7 +468,6 @@ export default function (pi: ExtensionAPI) {
               return [left + pad + right];
             }
 
-            // Not enough room: keep the left stats, truncate/drop the model.
             const availForRight = width - leftW - minPad;
             if (availForRight > 0) {
               const truncated = truncateToWidth(right, availForRight, "");
@@ -526,25 +480,21 @@ export default function (pi: ExtensionAPI) {
         };
       });
     } catch {
-      // Custom footer unsupported in this build; degrade to a status line.
       useStatusFallback = true;
     }
   }
 
-  // Install up front so the footer shows before the first message is sent.
   pi.on("session_start", (_event, ctx) => {
     lastCtx = ctx;
     if (ctx.hasUI && ctx.mode === "tui") installFooter(ctx);
     if (ctx.hasUI) startUsagePolling();
   });
 
-  // A settled turn is when the account usage numbers have just moved.
   pi.on("agent_settled", (_event, ctx) => {
     lastCtx = ctx;
     void refreshUsage(activeSource());
   });
 
-  // Switching provider should show that provider's usage straight away.
   pi.on("model_select", (event, ctx) => {
     lastCtx = ctx;
     routedProvider = undefined;
@@ -565,7 +515,6 @@ export default function (pi: ExtensionAPI) {
     usageTicker = undefined;
   });
 
-  // Reset the average accumulators so "avg" covers only this response's turns.
   pi.on("agent_start", (_event, ctx) => {
     lastCtx = ctx;
     totalOutput = 0;
@@ -580,11 +529,9 @@ export default function (pi: ExtensionAPI) {
     firstToken = undefined;
     tracking = true;
     routedProvider = undefined;
-    // Keep the previous tok/s visible until this turn computes a fresh rate.
     refresh();
   });
 
-  // OpenRouter's final stream chunk names the endpoint that served the request.
   pi.on("provider_stream_event", (event) => {
     if (event.provider !== "openrouter") return;
     const provider = routedProviderFromMetadata(event.data);
@@ -594,7 +541,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Anchor tok/s to the first streamed chunk so the rate excludes TTFT.
   pi.on("message_update", (event) => {
     if (!tracking || firstToken !== undefined) return;
     const delta = (event.assistantMessageEvent as any)?.delta;
@@ -608,7 +554,7 @@ export default function (pi: ExtensionAPI) {
     tracking = false;
 
     const usage = (event.message as any).usage ?? {};
-    const output: number = usage.output ?? 0; // includes reasoning tokens
+    const output: number = usage.output ?? 0;
     const genMs = Math.max(0, Date.now() - (firstToken ?? Date.now()));
     if (output <= 0 || genMs <= 0) return;
 
