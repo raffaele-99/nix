@@ -12,6 +12,7 @@
   python3,
   coreutils,
   gnused,
+  gawk,
   nixpkgsRev,
   onePasswordCli,
   realPi,
@@ -33,6 +34,8 @@ let
       nixpkgsRev + lib.concatMapStrings (path: "${path}") (lib.attrValues sandboxToolsets)
     )
   );
+
+  sandboxGuidelines = writeText "pi-sandbox-guidelines.md" "- You can use `uv` if you need pip packages.";
 
   # The desktop app authenticates the peer connected to s.sock, so a raw socat
   # relay is rejected. This narrow RPC bridge executes the signed host op CLI
@@ -478,11 +481,14 @@ let
         copy_agent_item "$name"
       done
 
-      if [[ -f "$agent_dir/SYSTEM.md" ]]; then
-        chmod u+w "$agent_dir/SYSTEM.md"
-        # shellcheck disable=SC2016
-        sed -i '/<\/guidelines>/i - You can use `uv` if you need pip packages.' "$agent_dir/SYSTEM.md"
-      fi
+      add_sandbox_guidelines() {
+        local system_prompt="$agent_dir/SYSTEM.md"
+        [[ -f "$system_prompt" ]] || return 0
+        ${gawk}/bin/awk -v guidelines="$(cat ${sandboxGuidelines})" \
+          '/<\/guidelines>/ { print guidelines } { print }' "$system_prompt" > "$system_prompt.new"
+        mv -f "$system_prompt.new" "$system_prompt"
+      }
+      add_sandbox_guidelines
 
       if $no_cwd; then
         install -m 0444 ${./no-cwd.ts} "$agent_dir/no-cwd.ts"
