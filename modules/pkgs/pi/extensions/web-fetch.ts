@@ -96,7 +96,7 @@ export default function (pi: ExtensionAPI) {
         });
         if (!html && !truncated) return { content: [{ type: "text", text: content }], details: {} };
         const note = `\n\n[${truncated ? "Truncated. " : ""}Raw response: ${raw}]`;
-        return { content: [{ type: "text", text: content + note }], details: { rawBytes: Buffer.byteLength(body) } };
+        return { content: [{ type: "text", text: content + note }], details: { rawBytes: Buffer.byteLength(body), rawChars: body.length } };
       } catch (err: any) {
         if (signal?.aborted) throw new Error("aborted");
         const body = /html/i.test(err?.stdout ?? "") ? "" : await readFile(raw, "utf8").catch(() => "");
@@ -110,10 +110,11 @@ export default function (pi: ExtensionAPI) {
       const text = content?.type === "text" ? content.text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "") : "";
       if (text.startsWith("web_fetch failed")) return new Text(theme.fg("error", text), 0, 0);
       if (expanded) return new Text(theme.fg("dim", text), 0, 0);
-      const rawBytes = (result.details as { rawBytes?: number } | undefined)?.rawBytes;
+      const { rawBytes, rawChars } = (result.details as { rawBytes?: number; rawChars?: number } | undefined) ?? {};
       const size = `${rawBytes ? `${formatSize(rawBytes)} → ` : ""}${formatSize(Buffer.byteLength(text))}`;
       const tokens = Math.ceil(text.length / 4).toLocaleString();
-      return new Text(theme.fg("success", `${size} (${tokens} tokens)`), 0, 0);
+      const rawTokens = rawChars ? `${Math.ceil(rawChars / 4).toLocaleString()} → ` : "";
+      return new Text(theme.fg("success", `${size} (${rawTokens}${tokens} tokens)`), 0, 0);
     },
   });
 }
