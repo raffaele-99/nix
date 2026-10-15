@@ -478,10 +478,9 @@ let
         copy_agent_item "$name"
       done
 
-      # Sandbox-only guideline, added to the container's copy of SYSTEM.md.
       if [[ -f "$agent_dir/SYSTEM.md" ]]; then
         chmod u+w "$agent_dir/SYSTEM.md"
-        # shellcheck disable=SC2016 # backticks are literal markdown
+        # shellcheck disable=SC2016
         sed -i '/<\/guidelines>/i - You can use `uv` if you need pip packages.' "$agent_dir/SYSTEM.md"
       fi
 

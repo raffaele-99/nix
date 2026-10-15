@@ -5,8 +5,6 @@ const PROMPT = "$ ";
 
 const segmenter = new Intl.Segmenter();
 
-// truncateToWidth always emits a full SGR reset (\x1b[0m) around the ellipsis, which cuts off the
-// tool box's background colour mid-row. Truncate the plain text ourselves so no resets are emitted.
 function truncatePlain(text: string, maxWidth: number): string {
   if (maxWidth <= 0) return "";
   if (visibleWidth(text) <= maxWidth) return text;
@@ -40,7 +38,6 @@ function collapsedCall(theme: Theme, command: string, timeout: number | undefine
 
 const emptyResult: Component = { render: () => [], invalidate() {} };
 
-// The bash tool exposes no exit code to renderers; non-zero exits and failures only appear as a trailing status line in the text.
 function statusLabel(result: { content: { type: string; text?: string }[] }, isError: boolean): { text: string; ok: boolean } {
   if (!isError) return { text: "exit 0", ok: true };
   const text = result.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("\n");
@@ -79,7 +76,6 @@ export default function (pi: ExtensionAPI) {
       },
       renderResult(result, options, theme, context) {
         if (!renderFullResult) return emptyResult;
-        // Always run the full renderer so its elapsed-time timer bookkeeping keeps working.
         const fullResult = renderFullResult(result, options, theme, {
           ...context,
           lastComponent: context.state.fullResult,
