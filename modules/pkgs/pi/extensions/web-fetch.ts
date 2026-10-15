@@ -45,7 +45,7 @@ function htmlToMarkdown(html: string): string {
     .replace(/<[^>]*>/g, "")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/\0(\d+)\0/g, (_, i: string) => `\n\`\`\`\n${pres[Number(i)].replace(/<[^>]*>/g, "")}\n\`\`\`\n`);
+    .replace(/\0(\d+)\0/g, (_, i: string) => `\n\`\`\`\n${pres[Number(i)].replace(/<[^>]*>/g, "").replace(/^\r?\n|\r?\n$/g, "")}\n\`\`\`\n`);
   return decodeEntities(markdown).trim();
 }
 
@@ -58,13 +58,14 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ url: Type.String({ description: "http(s) URL to fetch" }) }),
 
     async execute(_toolCallId, { url }, signal) {
+      const target = url.replace(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//, "https://raw.githubusercontent.com/$1/");
+      const raw = join(await mkdtemp(join(tmpdir(), "pi-web-fetch-")), "raw");
       try {
-        const target = url.replace(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//, "https://raw.githubusercontent.com/$1/");
-        const raw = join(await mkdtemp(join(tmpdir(), "pi-web-fetch-")), "raw");
         const { stdout: type } = await execFileAsync(
           "curl",
           [
-            "-sSfL",
+            "-sSL",
+            "--fail-with-body",
             "--globoff",
             "--max-time", "30",
             "--max-filesize", String(25 * 1024 * 1024),
@@ -87,7 +88,9 @@ export default function (pi: ExtensionAPI) {
         return { content: [{ type: "text", text: content + note }], details: { rawBytes: Buffer.byteLength(body) } };
       } catch (err: any) {
         if (signal?.aborted) throw new Error("aborted");
-        return { content: [{ type: "text", text: `web_fetch failed: ${err?.stderr?.trim() || err?.message}` }], details: {} };
+        const body = /html/i.test(err?.stdout ?? "") ? "" : await readFile(raw, "utf8").catch(() => "");
+        const reason = [err?.stderr?.trim() || err?.message, body.trim().slice(0, 1000)].filter(Boolean).join("\n");
+        return { content: [{ type: "text", text: `web_fetch failed: ${reason}` }], details: {} };
       }
     },
 
