@@ -6,10 +6,6 @@ type Goal = {
   status: "active" | "complete";
 };
 
-let goal: Goal | null = null;
-let lastObjective: string | null = null;
-let continuationQueued = false;
-let toolRegistered = false;
 
 function continuationPrompt(objective: string): string {
   return `Continue working toward the active goal.
@@ -22,6 +18,16 @@ Before deciding the goal is achieved, verify against real evidence (files, comma
 }
 
 export default function goalExtension(pi: ExtensionAPI) {
+  // Per-session state. Must live inside the factory: the extension module is
+  // cached across session replacement (/new, fork, switchSession) and the factory
+  // is re-invoked against a fresh session tool registry. Module-level state would
+  // persist a stale `toolRegistered = true`, so the lazy registerTool below would
+  // be skipped and complete_goal would be "not found" in the new session.
+  let goal: Goal | null = null;
+  let lastObjective: string | null = null;
+  let continuationQueued = false;
+  let toolRegistered = false;
+
   // Only load complete_goal tool when /goal is used to avoid polluting context
   // This causes a cache invalidation (increasing token cost), however as i use goal early on its fine.
   function ensureToolRegistered() {
@@ -44,7 +50,7 @@ export default function goalExtension(pi: ExtensionAPI) {
         }
         goal = { ...goal, status: "complete" };
         continuationQueued = false;
-        return { content: [{ type: "text", text: "Goal marked complete." }] };
+        return { content: [{ type: "text", text: "Goal marked complete." }], terminate: true };
       },
     });
   }
@@ -75,7 +81,15 @@ export default function goalExtension(pi: ExtensionAPI) {
   pi.registerCommand("crits", {
     description: "Find critical vulnerabilities in a codebase",
     handler: async (_args, ctx) => {
-      const presetGoal = `Find a unique (known findings are listed in KNOWN-FINDINGS.md) critical vulnerability in the codebase. Verify identified vulnerabilities end to end by tracing code flow. Clone third party modules to refer to the source authoritatively instead of recalling from memory. Keep track of progress in PROGRESS.md.`;
+      const presetGoal = `Find a distinct critical vulnerability in the codebase.
+
+- Store progress on leads in markdown files in ~/box/hunt/progress/
+- Store the known finding within ~/box/hunt/known-findings/
+- Create the above directories if they do not exist.
+- A distinct vulnerability is one that is distinct from the other findings in ~/box/hunt/known-findings. Verify that the distinct vulnerability is different to all other findings in this directory.
+- Verify identified vulnerabilities end to end by tracing code flow.
+- The vulnerability chain may pass through code in open source third party libraries. Clone these libraries to refer to the source authoritatively instead of recalling from memory.
+- Subagents can be used to investigate multiple paths at once. For more information use the bash command "subagent --help".`;
       startGoal(presetGoal, ctx);
     },
   });
