@@ -13,7 +13,7 @@ import {
   truncateHead,
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { getCapabilities, hyperlink, Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 
 const execFileAsync = promisify(execFile);
@@ -106,6 +106,14 @@ function searchOnHost(
   });
 }
 
+function plain(text: string): string {
+  return String(text ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
+function link(text: string, url: string): string {
+  return getCapabilities().hyperlinks && /^https?:\/\//.test(url) ? hyperlink(text, url) : text;
+}
+
 function countResults(output: string): number | undefined {
   try {
     const parsed = JSON.parse(output);
@@ -125,7 +133,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
-    description: `Search the web via Brave Search. Returns a JSON array of {title, url, description}. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(
+    description: `Search the web via Brave Search. Returns a JSON array of {title, url, description}; to read a result's page, use web_fetch. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(
       DEFAULT_MAX_BYTES,
     )} (whichever is hit first); if truncated, full output is saved to a temp file.`,
     promptSnippet: "Search the web with the web_search tool",
@@ -233,11 +241,12 @@ export default function (pi: ExtensionAPI) {
         } catch {}
         if (Array.isArray(results)) {
           for (const r of results) {
-            text += `\n${theme.fg("accent", r.title)} ${theme.fg("dim", r.url)}`;
+            const url = plain(r.url);
+            text += `\n${link(theme.fg("accent", plain(r.title)), url)} ${link(theme.fg("dim", url), url)}`;
           }
         } else {
           for (const line of content.text.split("\n").slice(0, 40)) {
-            text += `\n${theme.fg("dim", line)}`;
+            text += `\n${theme.fg("dim", plain(line))}`;
           }
         }
       }
