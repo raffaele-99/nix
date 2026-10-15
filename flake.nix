@@ -73,6 +73,7 @@
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
       packages.aarch64-darwin.scanhaus = darwinPkgs.callPackage ./pkgs/scanhaus { };
       packages.aarch64-darwin.tart = darwinPkgs.callPackage ./pkgs/tart { };
+      packages.aarch64-darwin.bx = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bx { };
       packages.aarch64-darwin.bxs = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bxs { };
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
       packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/pi {
