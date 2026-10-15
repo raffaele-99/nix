@@ -21,10 +21,13 @@ function collapsedCall(theme: Theme, command: string, timeout: number | undefine
   };
 }
 
+const emptyResult: Component = { render: () => [], invalidate() {} };
+
 export default function (pi: ExtensionAPI) {
   pi.registerToolRenderer((toolName, next) => {
     const renderers = next();
     const renderFullCall = renderers?.renderCall;
+    const renderFullResult = renderers?.renderResult;
     if (toolName !== "bash" || !renderFullCall) return renderers;
 
     return {
@@ -36,6 +39,16 @@ export default function (pi: ExtensionAPI) {
         const { command, timeout } = (args ?? {}) as Partial<BashToolInput>;
         if (context.expanded || typeof command !== "string" || !command.trim()) return fullCall;
         return collapsedCall(theme, command, timeout);
+      },
+      renderResult(result, options, theme, context) {
+        if (!renderFullResult) return emptyResult;
+        // Always run the full renderer so its elapsed-time timer bookkeeping keeps working.
+        const fullResult = renderFullResult(result, options, theme, {
+          ...context,
+          lastComponent: context.state.fullResult,
+        });
+        context.state.fullResult = fullResult;
+        return context.expanded ? fullResult : emptyResult;
       },
     };
   });
