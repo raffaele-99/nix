@@ -170,8 +170,6 @@ let
       Env = [
         "HOME=/root"
         "PATH=/root/.cache/python/bin:${lib.makeBinPath imagePackages}"
-        # The root filesystem is read-only, so installs go to the /root/.cache tmpfs
-        # (lost on exit). Use the nix python rather than downloading unpatched ones.
         "PYTHONUSERBASE=/root/.cache/python"
         "UV_PYTHON_DOWNLOADS=never"
         "UV_TOOL_BIN_DIR=/root/.cache/python/bin"
