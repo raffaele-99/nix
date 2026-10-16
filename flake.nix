@@ -15,6 +15,10 @@
       url = "file+https://caido.download/releases/latest";
       flake = false;
     };
+    sonic-the-hedgehog = {
+      url = "git+https://github.com/take-it-ez-babe/sonic-the-hedgehog";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -24,6 +28,7 @@
       nix-darwin,
       home-manager,
       caidoRelease,
+      sonic-the-hedgehog,
       ...
     }:
     let
@@ -58,6 +63,7 @@
       };
 
       darwinConfigurations.mac-mini = nix-darwin.lib.darwinSystem {
+        specialArgs.sonic-the-hedgehog = sonic-the-hedgehog.packages.aarch64-darwin.default;
         modules = [
           self.darwinModules.default
           ./hosts/mac-mini.nix

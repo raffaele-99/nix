@@ -73,7 +73,28 @@
         "caidoRelease": "caidoRelease",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "sonic-the-hedgehog": "sonic-the-hedgehog"
+      }
+    },
+    "sonic-the-hedgehog": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792156438,
+        "narHash": "sha256-HQn5lNF1MHjdLmAaVHoPveTVJW7O6QJ8tw3ZwR5P+IU=",
+        "ref": "refs/heads/main",
+        "rev": "c3e47e2b14980b1209a6d110902d84dc633fd02c",
+        "revCount": 19,
+        "type": "git",
+        "url": "https://github.com/take-it-ez-babe/sonic-the-hedgehog"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://github.com/take-it-ez-babe/sonic-the-hedgehog"
       }
     }
   },

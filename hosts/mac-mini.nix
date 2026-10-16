@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  sonic-the-hedgehog,
   ...
 }:
 {
@@ -12,7 +13,10 @@
   };
 
   config = {
-    environment.systemPackages = [ (pkgs.callPackage ../pkgs/tart { }) ];
+    environment.systemPackages = [
+      (pkgs.callPackage ../pkgs/tart { })
+      sonic-the-hedgehog
+    ];
 
     security.pam.services.sudo_local.enable = true;
 
