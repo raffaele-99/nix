@@ -1,10 +1,21 @@
-{ config, ... }:
+{
+  config,
+  pi2,
+  ...
+}:
 {
   nixpkgs.hostPlatform = "aarch64-darwin";
   shared.username = "luca";
   shared.uid = 501;
 
+  environment.systemPackages = [ pi2 ];
+
   home-manager.users.${config.shared.username} = {
+    # ssh-add and other agent clients use this instead of SSH's IdentityAgent.
+    home.sessionVariables.SSH_AUTH_SOCK = "${
+      config.users.users.${config.shared.username}.home
+    }/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock";
+
     programs = {
       # Personal Macs keep this checkout at ~/nix.
       luca.settings = {

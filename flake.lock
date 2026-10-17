@@ -68,12 +68,33 @@
         "type": "github"
       }
     },
+    "pi2": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792225399,
+        "narHash": "sha256-p9O5m2baJDFrWJNwLuXNOxAx1AGeleHlHl8hJd3D3Pg=",
+        "ref": "refs/heads/main",
+        "rev": "fa2ce087b7233f4e51bd339e134004f84ddc3df5",
+        "revCount": 1,
+        "type": "git",
+        "url": "ssh://git@github.com/raffaele-99/pi2.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/raffaele-99/pi2.git"
+      }
+    },
     "root": {
       "inputs": {
         "caidoRelease": "caidoRelease",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
         "nixpkgs": "nixpkgs",
+        "pi2": "pi2",
         "sonic-the-hedgehog": "sonic-the-hedgehog"
       }
     },
