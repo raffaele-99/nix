@@ -15,6 +15,10 @@
       url = "file+https://caido.download/releases/latest";
       flake = false;
     };
+    pi2 = {
+      url = "git+ssh://git@github.com/raffaele-99/pi2.git";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     sonic-the-hedgehog = {
       url = "git+https://github.com/take-it-ez-babe/sonic-the-hedgehog";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -28,6 +32,7 @@
       nix-darwin,
       home-manager,
       caidoRelease,
+      pi2,
       sonic-the-hedgehog,
       ...
     }:
@@ -56,6 +61,7 @@
       };
 
       darwinConfigurations.personal-macbook = nix-darwin.lib.darwinSystem {
+        specialArgs.pi2 = pi2.packages.aarch64-darwin.default;
         modules = [
           self.darwinModules.default
           ./hosts/personal-macbook.nix
@@ -63,7 +69,10 @@
       };
 
       darwinConfigurations.mac-mini = nix-darwin.lib.darwinSystem {
-        specialArgs.sonic-the-hedgehog = sonic-the-hedgehog.packages.aarch64-darwin.default;
+        specialArgs = {
+          pi2 = pi2.packages.aarch64-darwin.default;
+          sonic-the-hedgehog = sonic-the-hedgehog.packages.aarch64-darwin.default;
+        };
         modules = [
           self.darwinModules.default
           ./hosts/mac-mini.nix
@@ -86,6 +95,12 @@
         nixpkgsRev = nixpkgs.rev;
         onePasswordCli = darwinPkgs._1password-cli;
         realPi = nixpkgs.legacyPackages.aarch64-darwin.pi-coding-agent;
+      };
+      packages.aarch64-darwin.pi2 = pi2.packages.aarch64-darwin.default;
+      apps.aarch64-darwin.pi2 = {
+        type = "app";
+        program = "${self.packages.aarch64-darwin.pi2}/bin/pi2";
+        meta.description = "Run Pi with private early-hangup transports";
       };
       apps.aarch64-darwin.luca = {
         type = "app";
