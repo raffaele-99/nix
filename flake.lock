@@ -84,11 +84,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792156438,
-        "narHash": "sha256-HQn5lNF1MHjdLmAaVHoPveTVJW7O6QJ8tw3ZwR5P+IU=",
+        "lastModified": 1792222704,
+        "narHash": "sha256-9X00y2CIhBwLfbZaWuFrwkOiiXJMafy0GSxoIkcGSjM=",
         "ref": "refs/heads/main",
-        "rev": "c3e47e2b14980b1209a6d110902d84dc633fd02c",
-        "revCount": 19,
+        "rev": "b8332fa4627b4842be0226ce6ce83a1111e7ffb4",
+        "revCount": 20,
         "type": "git",
         "url": "https://github.com/take-it-ez-babe/sonic-the-hedgehog"
       },
