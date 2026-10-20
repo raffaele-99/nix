@@ -1,7 +1,19 @@
 import { type ExtensionAPI, Theme, type ThemeBg, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { backgroundAnsi, type Color, colorToHex, mixColors, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  backgroundAnsi,
+  Box,
+  type Color,
+  colorToHex,
+  type Component,
+  type Container,
+  mixColors,
+  type TuiMouseEvent,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 
 const ORIGINAL_RENDER = Symbol.for("gradient-tools.originalRender");
+const ORIGINAL_HANDLE_MOUSE = Symbol.for("gradient-tools.originalHandleMouse");
 const RESET_BACKGROUND = "\x1b[49m";
 const CSI = String.raw`\[[0-?]*[ -/]*[@-~]`;
 const STRING_COMMAND = String.raw`[\]_P^X][^\x07\x1b]*`;
@@ -16,20 +28,59 @@ const MAX_CACHED_RAMPS = 64;
 const TERMINAL_DEFAULT = "";
 const EXTENDED_COLOR_CODES = new Set([38, 48, 58]);
 
+const RESULT_SEPARATOR = " · ";
+const ELLIPSIS = "…";
+const MIN_CALL_WIDTH = 20;
+const PADDING_ROWS = 1;
+const ROW_HEIGHT_IN_COLUMNS = 2;
+const PADDING_COLUMNS = PADDING_ROWS * ROW_HEIGHT_IN_COLUMNS;
+
 type GradientTool = {
   isPartial: boolean;
+  expanded: boolean;
   result?: { isError?: boolean };
   toolDefinition?: { renderShell?: string };
-  outputPad?: number;
   selfRenderHeight?: number;
+  selfRenderContainer: Container;
   render(width: number): string[];
+  handleMouse(event: TuiMouseEvent): ReturnType<Container["handleMouse"]>;
 };
+
+type PaddedBlock = { top: number; contentHeight: number; contentWidth: number };
+
+type RenderContext = { lastComponent: Component | undefined };
 
 type BackgroundChange = "set" | "cleared" | "unchanged";
 
 const graphemes = new Intl.Segmenter();
 const ramps = new Map<string, string[]>();
 const paintCaches = new WeakMap<object, { ramp: string[]; lines: Map<string, string> }>();
+const callLineCaches = new WeakMap<object, { key: string; line: string | undefined }>();
+const paddedBlocks = new WeakMap<object, PaddedBlock>();
+const boxContents = new WeakMap<Box, Component>();
+const unboxedBoxes = new WeakMap<Component, Box>();
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function withoutBox(component: Component): Component {
+  if (!(component instanceof Box)) return component;
+  const existing = boxContents.get(component);
+  if (existing) return existing;
+  const contents: Component = {
+    render: (width) => component.children.flatMap((child) => child.render(width)),
+    invalidate: () => component.invalidate(),
+  };
+  boxContents.set(component, contents);
+  unboxedBoxes.set(contents, component);
+  return contents;
+}
+
+function withOriginalLastComponent<Context extends RenderContext>(context: Context): Context {
+  const box = context.lastComponent && unboxedBoxes.get(context.lastComponent);
+  return box ? { ...context, lastComponent: box } : context;
+}
 
 function tintStrength(fractionAcross: number): number {
   return (1 - fractionAcross) ** FADE_EXPONENT;
@@ -149,12 +200,58 @@ function paintBehindContent(line: string, width: number, ramp: string[]): string
   return out + RESET_BACKGROUND;
 }
 
+function isBlank(line: string): boolean {
+  return visibleWidth(line.replace(/\s/g, "")) === 0;
+}
+
+function trimTrailingSpaces(line: string): string {
+  return line.replace(/ +$/, "");
+}
+
+function fitToWidth(call: Component, line: string, width: number): string {
+  const trimmed = trimTrailingSpaces(line);
+  if (visibleWidth(trimmed) <= width) return trimmed;
+  const narrower = call.render(width).map(trimTrailingSpaces);
+  if (narrower.length === 1 && visibleWidth(narrower[0]) <= width) return narrower[0];
+  return truncateToWidth(trimmed, width, ELLIPSIS);
+}
+
+function callLineWithResult(tool: GradientTool, theme: Theme, width: number): string | undefined {
+  const [call, result] = tool.selfRenderContainer.children;
+  if (!call || !result) return undefined;
+  const callLines = call.render(width);
+  const resultLines = result.render(width).filter((line) => !isBlank(line));
+  if (callLines.length !== 1 || resultLines.length !== 1) return undefined;
+
+  const key = `${width}\n${callLines[0]}\n${resultLines[0]}`;
+  const cached = callLineCaches.get(tool);
+  if (cached?.key === key) return cached.line;
+
+  const suffix = theme.fg("dim", RESULT_SEPARATOR) + trimTrailingSpaces(resultLines[0]);
+  const callWidth = width - visibleWidth(suffix);
+  const line = callWidth < MIN_CALL_WIDTH ? undefined : fitToWidth(call, callLines[0], callWidth) + suffix;
+  callLineCaches.set(tool, { key, line });
+  return line;
+}
+
 export default function (pi: ExtensionAPI) {
   let currentTheme: () => Theme | undefined = () => undefined;
 
   pi.registerToolRenderer((_toolName, next) => {
     const renderers = next();
-    return renderers && { ...renderers, renderShell: "self" };
+    if (!renderers) return renderers;
+    const { renderCall, renderResult } = renderers;
+    return {
+      ...renderers,
+      renderShell: "self",
+      renderCall:
+        renderCall &&
+        ((args, theme, context) => withoutBox(renderCall(args, theme, withOriginalLastComponent(context)))),
+      renderResult:
+        renderResult &&
+        ((result, options, theme, context) =>
+          withoutBox(renderResult(result, options, theme, withOriginalLastComponent(context)))),
+    };
   });
 
   pi.on("session_start", (_event, ctx) => {
@@ -171,31 +268,56 @@ export default function (pi: ExtensionAPI) {
   const originalRender = (prototype[ORIGINAL_RENDER] ?? prototype.render) as GradientTool["render"];
   prototype[ORIGINAL_RENDER] = originalRender;
 
+  const originalHandleMouse = (prototype[ORIGINAL_HANDLE_MOUSE] ?? prototype.handleMouse) as GradientTool["handleMouse"];
+  prototype[ORIGINAL_HANDLE_MOUSE] = originalHandleMouse;
+
   prototype.render = function (this: GradientTool, width: number): string[] {
     const theme = currentTheme();
-    const pad = this.outputPad ?? 1;
-    if (!theme || this.toolDefinition?.renderShell !== "self" || width <= 2 * pad + 1) {
+    paddedBlocks.delete(this);
+    if (!theme || this.toolDefinition?.renderShell !== "self" || width <= 2 * PADDING_COLUMNS + 1) {
       return originalRender.call(this, width);
     }
 
-    const lines = originalRender.call(this, width - 2 * pad);
+    const contentWidth = width - 2 * PADDING_COLUMNS;
+    const lines = originalRender.call(this, contentWidth);
     const hasSpacerLine = lines[0] === "";
     const contentStart = hasSpacerLine ? 1 : 0;
     const contentEnd = contentStart + (this.selfRenderHeight ?? lines.length);
+    if (contentEnd === contentStart) return lines;
+
+    const singleLine = this.expanded ? undefined : callLineWithResult(this, theme, contentWidth);
+    const content = singleLine === undefined ? lines.slice(contentStart, contentEnd) : [singleLine];
+    paddedBlocks.set(this, { top: contentStart, contentHeight: content.length, contentWidth });
+
     const ramp = fadingBackgroundPerColumn(theme, statusBackground(this), width);
     const previous = paintCaches.get(this);
     const cached = previous?.ramp === ramp ? previous.lines : undefined;
     const painted = new Map<string, string>();
-    const padding = " ".repeat(pad);
-
-    const result = lines.map((line, index) => {
-      const isToolContent = index >= contentStart && index < contentEnd;
-      if (!isToolContent || GRAPHICS_LINE.test(line)) return line;
-      const output = cached?.get(line) ?? paintBehindContent(padding + line, width, ramp);
+    const leftPadding = " ".repeat(PADDING_COLUMNS);
+    const paint = (line: string) => {
+      if (GRAPHICS_LINE.test(line)) return line;
+      const output = cached?.get(line) ?? paintBehindContent(leftPadding + line, width, ramp);
       painted.set(line, output);
       return output;
-    });
+    };
+
+    const paddingRows = Array<string>(PADDING_ROWS).fill("");
+    const block = [...paddingRows, ...content, ...paddingRows].map(paint);
     paintCaches.set(this, { ramp, lines: painted });
-    return result;
+    return [...lines.slice(0, contentStart), ...block, ...lines.slice(contentEnd)];
+  };
+
+  prototype.handleMouse = function (this: GradientTool, event: TuiMouseEvent) {
+    const block = paddedBlocks.get(this);
+    if (!block) return originalHandleMouse.call(this, event);
+    const row = event.y - block.top;
+    if (row < 0 || row >= block.contentHeight + 2 * PADDING_ROWS) return undefined;
+    return this.selfRenderContainer.handleMouse({
+      ...event,
+      x: clamp(event.x - PADDING_COLUMNS, 0, block.contentWidth - 1),
+      y: clamp(row - PADDING_ROWS, 0, block.contentHeight - 1),
+      width: block.contentWidth,
+      height: block.contentHeight,
+    });
   };
 }
