@@ -17,6 +17,7 @@ import {
   mixColors,
   ScrollView,
   Spacer,
+  Text,
   type TuiMouseEvent,
   truncateToWidth,
   visibleWidth,
@@ -72,13 +73,17 @@ type GradientTool = Component & {
 
 type TranscriptItem =
   | { kind: "tool"; component: GradientTool; message?: undefined }
-  | { kind: "thought" | "spacer" | "content"; component: Component; message?: AssistantMessageComponent };
+  | { kind: "thought" | "spacer" | "notice" | "content"; component: Component; message?: AssistantMessageComponent };
 
 type WorkRun = { start: number; end: number; trailing: boolean };
 
 type ToolGroup = WorkRun & { tools: GradientTool[]; thoughts: number };
 
 type ShownGroup = { group: ToolGroup; expanded: boolean; members: TranscriptItem[] };
+
+type GroupMember = { component: Component; branches: boolean };
+
+type Gutter = (member: number, row: number) => string;
 
 type MemberSlot = { region: MouseRegion; top: number; height: number };
 
@@ -314,10 +319,15 @@ function messageItems(message: AssistantMessageComponent): TranscriptItem[] | un
   return messageParts(message)?.map((part) => ({ kind: partKind(part), component: part, message }));
 }
 
+function childKind(child: Component): "spacer" | "notice" | "content" {
+  if (child instanceof Spacer) return "spacer";
+  return child instanceof Text ? "notice" : "content";
+}
+
 function itemsOf(child: Component): TranscriptItem[] {
   if (isGradientTool(child)) return [{ kind: "tool", component: child }];
   const parts = child instanceof AssistantMessageComponent ? messageItems(child) : undefined;
-  return parts ?? [{ kind: child instanceof Spacer ? "spacer" : "content", component: child }];
+  return parts ?? [{ kind: childKind(child), component: child }];
 }
 
 function isWork(item: TranscriptItem): boolean {
@@ -325,7 +335,8 @@ function isWork(item: TranscriptItem): boolean {
 }
 
 function isGap(item: TranscriptItem, width: number): boolean {
-  return item.kind === "spacer" || (item.kind === "content" && item.component.render(width).length === 0);
+  if (item.kind === "spacer" || item.kind === "notice") return true;
+  return item.kind === "content" && item.component.render(width).length === 0;
 }
 
 function runStart(items: TranscriptItem[], firstWork: number, boundary: number, width: number): number {
@@ -365,8 +376,8 @@ function toolGroups(items: TranscriptItem[], width: number): ToolGroup[] {
 }
 
 function spacedFromHeader(members: TranscriptItem[]): TranscriptItem[] {
-  const startsFlush = members[0]?.kind === "thought";
-  return startsFlush ? [{ kind: "spacer", component: new Spacer(1) }, ...members] : members;
+  const bringsBlankLine = members[0]?.kind === "spacer" || members[0]?.kind === "tool";
+  return bringsBlankLine ? members : [{ kind: "spacer", component: new Spacer(1) }, ...members];
 }
 
 function countOf(count: number, noun: string): string {
@@ -438,8 +449,10 @@ function responseZones(shown: TranscriptItem[]): (item: TranscriptItem) => Compo
   };
 }
 
-function treeGutter(memberLines: string[][], theme: Theme): (member: number, row: number) => string {
-  const branchRows = memberLines.map((lines) => lines.findIndex((line) => !isBlank(line)));
+function treeGutter(members: GroupMember[], memberLines: string[][], theme: Theme): Gutter {
+  const branchRow = (lines: string[], member: number) =>
+    members[member].branches ? lines.findIndex((line) => !isBlank(line)) : -1;
+  const branchRows = memberLines.map(branchRow);
   const lastBranch = branchRows.findLastIndex((row) => row >= 0);
   const glyph = (member: number, row: number) => {
     if (member > lastBranch) return TREE_GAP;
@@ -454,8 +467,8 @@ function behindGutter(gutter: string, line: string): string {
   return zoneMarks + gutter + line.slice(zoneMarks.length);
 }
 
-function drawTree(memberLines: string[][], theme: Theme): string[] {
-  const gutter = treeGutter(memberLines, theme);
+function drawTree(members: GroupMember[], memberLines: string[][], theme: Theme): string[] {
+  const gutter = treeGutter(members, memberLines, theme);
   return memberLines.flatMap((rows, member) => rows.map((line, row) => behindGutter(gutter(member, row), line)));
 }
 
@@ -477,10 +490,10 @@ function mouseRegionOf(member: Component): MouseRegion {
   return region;
 }
 
-function memberSlots(members: Component[], memberLines: string[][]): MemberSlot[] {
+function memberSlots(members: GroupMember[], memberLines: string[][]): MemberSlot[] {
   let top = 0;
   return memberLines.map((rows, member) => {
-    const slot = { region: mouseRegionOf(members[member]), top, height: rows.length };
+    const slot = { region: mouseRegionOf(members[member].component), top, height: rows.length };
     top += rows.length;
     return slot;
   });
@@ -488,12 +501,12 @@ function memberSlots(members: Component[], memberLines: string[][]): MemberSlot[
 
 class GroupBody implements Component {
   private theme: Theme | undefined;
-  private members: Component[] = [];
+  private members: GroupMember[] = [];
   private slots: MemberSlot[] = [];
   private memberWidth = 1;
   private drawing: { theme: Theme; memberLines: string[][]; lines: string[] } | undefined;
 
-  show(theme: Theme, members: Component[]): this {
+  show(theme: Theme, members: GroupMember[]): this {
     this.theme = theme;
     this.members = members;
     return this;
@@ -503,10 +516,10 @@ class GroupBody implements Component {
     const theme = this.theme;
     if (!theme) return [];
     this.memberWidth = Math.max(1, width - TREE_WIDTH);
-    const memberLines = this.members.map((member) => member.render(this.memberWidth));
+    const memberLines = this.members.map(({ component }) => component.render(this.memberWidth));
     this.slots = memberSlots(this.members, memberLines);
     if (this.drawing?.theme !== theme || !sameMemberLines(this.drawing.memberLines, memberLines)) {
-      this.drawing = { theme, memberLines, lines: drawTree(memberLines, theme) };
+      this.drawing = { theme, memberLines, lines: drawTree(this.members, memberLines, theme) };
     }
     return this.drawing.lines;
   }
@@ -637,7 +650,8 @@ export default function (pi: ExtensionAPI) {
   const groupSegments = (entry: ShownGroup, theme: Theme, zoned: (item: TranscriptItem) => Component) => {
     const { header, body } = viewsOf(entry.group);
     header.show(theme, groupSummary(entry.group, theme, entry.expanded), groupBackground(entry.group, agentRunning));
-    return entry.expanded ? [header, body.show(theme, entry.members.map(zoned))] : [header];
+    const members = entry.members.map((item) => ({ component: zoned(item), branches: isWork(item) }));
+    return entry.expanded ? [header, body.show(theme, members)] : [header];
   };
 
   const transcriptSegments = (container: Container, width: number, theme: Theme): Component[] => {
