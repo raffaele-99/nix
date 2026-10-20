@@ -17,7 +17,9 @@ import {
   mixColors,
   ScrollView,
   Spacer,
+  stripTerminalSequences,
   Text,
+  TuiAltScreen,
   type TuiMouseEvent,
   truncateToWidth,
   visibleWidth,
@@ -28,6 +30,8 @@ const ORIGINAL_HANDLE_MOUSE = Symbol.for("gradient-tools.originalHandleMouse");
 const ORIGINAL_CONTAINER_RENDER = Symbol.for("gradient-tools.originalContainerRender");
 const ORIGINAL_CONTAINER_HANDLE_MOUSE = Symbol.for("gradient-tools.originalContainerHandleMouse");
 const ORIGINAL_UPDATE_LAYOUT = Symbol.for("gradient-tools.originalUpdateLayout");
+const ORIGINAL_APPLY_SELECTION = Symbol.for("gradient-tools.originalApplySelection");
+const ORIGINAL_SELECTION_COLUMNS = Symbol.for("gradient-tools.originalSelectionColumns");
 const RESET_BACKGROUND = "\x1b[49m";
 const CSI = String.raw`\[[0-?]*[ -/]*[@-~]`;
 const STRING_COMMAND = String.raw`[\]_P^X][^\x07\x1b]*`;
@@ -86,6 +90,31 @@ type GroupMember = { component: Component; branches: boolean };
 type Gutter = (member: number, row: number) => string;
 
 type MemberSlot = { region: MouseRegion; top: number; height: number };
+
+type ColumnRange = { start: number; end: number };
+
+type SelectionBounds = { start: { scrollView?: ScrollView }; end: { scrollView?: ScrollView } };
+
+type LayoutBoxShape = {
+  rect: { x: number; y: number };
+  children: LayoutBoxShape[];
+  scrollView?: ScrollView;
+  scrollContentLines?: readonly string[];
+};
+
+type LayoutShape = { root: LayoutBoxShape };
+
+type AltScreenSelection = Record<symbol, unknown> & {
+  currentLayout?: LayoutShape;
+  applySelection(screen: string[], layout?: LayoutShape): string[];
+  getSelectionColumns(
+    line: string,
+    row: number,
+    selection: SelectionBounds,
+    minColumn?: number,
+    maxColumn?: number,
+  ): ColumnRange;
+};
 
 type PaddedBlock = { top: number; contentHeight: number; contentWidth: number };
 
@@ -485,6 +514,46 @@ function sameMemberLines(previous: string[][], next: string[][]): boolean {
   );
 }
 
+function treeGutterWidth(line: string, theme: Theme): number {
+  const content = line.replace(RESPONSE_ZONE_MARKS, "");
+  const glyphs = [TREE_BRANCH, TREE_LAST_BRANCH, TREE_TRUNK, TREE_GAP];
+  return glyphs.some((glyph) => content.startsWith(TREE_INDENT + theme.fg("dim", glyph))) ? TREE_WIDTH : 0;
+}
+
+function textColumns(line: string, theme: Theme): ColumnRange | undefined {
+  const gutter = treeGutterWidth(line, theme);
+  const text = stripTerminalSequences(line).slice(gutter);
+  const content = text.trim();
+  if (!content) return undefined;
+  const start = gutter + visibleWidth(text.slice(0, text.length - text.trimStart().length));
+  return { start, end: start + visibleWidth(content) };
+}
+
+function scrollBoxOf(box: LayoutBoxShape, scrollView: ScrollView): LayoutBoxShape | undefined {
+  if (box.scrollView === scrollView) return box;
+  for (const child of box.children) {
+    const found = scrollBoxOf(child, scrollView);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function contentAt(layout: LayoutShape, selection: SelectionBounds, row: number, screenLine: string) {
+  const scrollView = selection.start.scrollView;
+  const box = scrollView ? scrollBoxOf(layout.root, scrollView) : undefined;
+  if (!scrollView || !box?.scrollContentLines) return { line: screenLine, offset: 0 };
+  return { line: box.scrollContentLines[scrollView.scrollTop + row - box.rect.y] ?? "", offset: box.rect.x };
+}
+
+function highlightedColumns(columns: ColumnRange, text: ColumnRange | undefined, offset: number): ColumnRange {
+  if (!text) return { start: columns.start, end: columns.start };
+  return { start: Math.max(columns.start, offset + text.start), end: Math.min(columns.end, offset + text.end) };
+}
+
+function copiedColumns(columns: ColumnRange, line: string, theme: Theme): ColumnRange {
+  return { start: Math.max(columns.start, treeGutterWidth(line, theme)), end: columns.end };
+}
+
 function mouseRegionOf(member: Component): MouseRegion {
   let region = memberRegions.get(member);
   if (!region) {
@@ -775,5 +844,41 @@ export default function (pi: ExtensionAPI) {
   ) {
     if (this.primary) transcriptViewport = { scrollView: this, contentHeight };
     originalUpdateLayout.call(this, contentHeight, viewportHeight, requestRender);
+  };
+
+  const altScreen = TuiAltScreen.prototype as unknown as AltScreenSelection;
+  const originalApplySelection = (altScreen[ORIGINAL_APPLY_SELECTION] ??
+    altScreen.applySelection) as AltScreenSelection["applySelection"];
+  altScreen[ORIGINAL_APPLY_SELECTION] = originalApplySelection;
+
+  const originalSelectionColumns = (altScreen[ORIGINAL_SELECTION_COLUMNS] ??
+    altScreen.getSelectionColumns) as AltScreenSelection["getSelectionColumns"];
+  altScreen[ORIGINAL_SELECTION_COLUMNS] = originalSelectionColumns;
+
+  let paintedLayout: LayoutShape | undefined;
+
+  altScreen.applySelection = function (this: AltScreenSelection, screen: string[], layout = this.currentLayout) {
+    paintedLayout = layout;
+    try {
+      return originalApplySelection.call(this, screen, layout);
+    } finally {
+      paintedLayout = undefined;
+    }
+  };
+
+  altScreen.getSelectionColumns = function (
+    this: AltScreenSelection,
+    line: string,
+    row: number,
+    selection: SelectionBounds,
+    minColumn?: number,
+    maxColumn?: number,
+  ) {
+    const columns = originalSelectionColumns.call(this, line, row, selection, minColumn, maxColumn);
+    const theme = currentTheme();
+    if (!theme) return columns;
+    if (!paintedLayout) return copiedColumns(columns, line, theme);
+    const content = contentAt(paintedLayout, selection, row, line);
+    return highlightedColumns(columns, textColumns(content.line, theme), content.offset);
   };
 }
