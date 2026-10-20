@@ -242,7 +242,7 @@ function paintBehindContent(line: string, width: number, ramp: string[]): string
   return out + RESET_BACKGROUND;
 }
 
-function paintBlock(owner: object, content: string[], width: number, ramp: string[]): string[] {
+function paintRows(owner: object, rows: string[], width: number, ramp: string[]): string[] {
   const previous = paintCaches.get(owner);
   const cached = previous?.ramp === ramp ? previous.lines : undefined;
   const painted = new Map<string, string>();
@@ -254,10 +254,14 @@ function paintBlock(owner: object, content: string[], width: number, ramp: strin
     return output;
   };
 
-  const paddingRows = Array<string>(PADDING_ROWS).fill("");
-  const block = [...paddingRows, ...content, ...paddingRows].map(paint);
+  const block = rows.map(paint);
   paintCaches.set(owner, { ramp, lines: painted });
   return block;
+}
+
+function paintBlock(owner: object, content: string[], width: number, ramp: string[]): string[] {
+  const paddingRows = Array<string>(PADDING_ROWS).fill("");
+  return paintRows(owner, [...paddingRows, ...content, ...paddingRows], width, ramp);
 }
 
 function isBlank(line: string): boolean {
@@ -580,7 +584,7 @@ class ToolGroupBlock implements Component {
     if (!this.theme) return [];
     const line = truncateToWidth(this.summary, Math.max(1, width - 2 * PADDING_COLUMNS), ELLIPSIS);
     const ramp = fadingBackgroundPerColumn(this.theme, this.background, width);
-    return ["", ...paintBlock(this, [line], width, ramp)];
+    return ["", ...paintRows(this, [line], width, ramp)];
   }
 
   handleMouse(event: TuiMouseEvent): { handled: true } | undefined {
