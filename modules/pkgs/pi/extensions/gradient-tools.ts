@@ -50,8 +50,15 @@ const PADDING_COLUMNS = PADDING_ROWS * ROW_HEIGHT_IN_COLUMNS;
 
 const COLLAPSED_GROUP = "▸";
 const EXPANDED_GROUP = "▾";
+const TREE_INDENT = " ".repeat(PADDING_COLUMNS);
+const TREE_BRANCH = "├─ ";
+const TREE_LAST_BRANCH = "└─ ";
+const TREE_TRUNK = "│  ";
+const TREE_GAP = "   ";
+const TREE_WIDTH = TREE_INDENT.length + TREE_BRANCH.length;
 const RESPONSE_ZONE_START = "\x1b]133;A\x07";
 const RESPONSE_ZONE_END = "\x1b]133;B\x07\x1b]133;C\x07";
+const RESPONSE_ZONE_MARKS = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
 
 type GradientTool = Component & {
   isPartial: boolean;
@@ -71,6 +78,10 @@ type WorkRun = { start: number; end: number; trailing: boolean };
 
 type ToolGroup = WorkRun & { tools: GradientTool[]; thoughts: number };
 
+type ShownGroup = { group: ToolGroup; expanded: boolean; members: TranscriptItem[] };
+
+type MemberSlot = { region: MouseRegion; top: number; height: number };
+
 type PaddedBlock = { top: number; contentHeight: number; contentWidth: number };
 
 type RenderContext = { lastComponent: Component | undefined };
@@ -84,6 +95,7 @@ const callLineCaches = new WeakMap<object, { key: string; line: string | undefin
 const paddedBlocks = new WeakMap<object, PaddedBlock>();
 const boxContents = new WeakMap<Box, Component>();
 const unboxedBoxes = new WeakMap<Component, Box>();
+const memberRegions = new WeakMap<Component, MouseRegion>();
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -411,19 +423,106 @@ class ResponseZone extends MouseRegion {
   }
 }
 
-function withResponseZones(shown: TranscriptItem[]): Component[] {
-  const firstShown = new Map<AssistantMessageComponent, number>();
-  const lastShown = new Map<AssistantMessageComponent, number>();
-  shown.forEach(({ message }, index) => {
-    if (!message || !isFinalResponse(message)) return;
-    if (!firstShown.has(message)) firstShown.set(message, index);
-    lastShown.set(message, index);
+function responseZones(shown: TranscriptItem[]): (item: TranscriptItem) => Component {
+  const firstShown = new Map<AssistantMessageComponent, TranscriptItem>();
+  const lastShown = new Map<AssistantMessageComponent, TranscriptItem>();
+  for (const item of shown) {
+    if (!item.message || !isFinalResponse(item.message)) continue;
+    if (!firstShown.has(item.message)) firstShown.set(item.message, item);
+    lastShown.set(item.message, item);
+  }
+  return (item) => {
+    const opens = item.message !== undefined && firstShown.get(item.message) === item;
+    const closes = item.message !== undefined && lastShown.get(item.message) === item;
+    return opens || closes ? new ResponseZone(item.component, opens, closes) : item.component;
+  };
+}
+
+function treeGutter(memberLines: string[][], theme: Theme): (member: number, row: number) => string {
+  const branchRows = memberLines.map((lines) => lines.findIndex((line) => !isBlank(line)));
+  const lastBranch = branchRows.findLastIndex((row) => row >= 0);
+  const glyph = (member: number, row: number) => {
+    if (member > lastBranch) return TREE_GAP;
+    if (row === branchRows[member]) return member === lastBranch ? TREE_LAST_BRANCH : TREE_BRANCH;
+    return member === lastBranch && row > branchRows[member] ? TREE_GAP : TREE_TRUNK;
+  };
+  return (member, row) => TREE_INDENT + theme.fg("dim", glyph(member, row));
+}
+
+function behindGutter(gutter: string, line: string): string {
+  const zoneMarks = line.match(RESPONSE_ZONE_MARKS)?.[0] ?? "";
+  return zoneMarks + gutter + line.slice(zoneMarks.length);
+}
+
+function drawTree(memberLines: string[][], theme: Theme): string[] {
+  const gutter = treeGutter(memberLines, theme);
+  return memberLines.flatMap((rows, member) => rows.map((line, row) => behindGutter(gutter(member, row), line)));
+}
+
+function sameMemberLines(previous: string[][], next: string[][]): boolean {
+  return (
+    previous.length === next.length &&
+    previous.every(
+      (rows, member) => rows.length === next[member].length && rows.every((line, row) => line === next[member][row]),
+    )
+  );
+}
+
+function mouseRegionOf(member: Component): MouseRegion {
+  let region = memberRegions.get(member);
+  if (!region) {
+    region = new MouseRegion(member, () => undefined);
+    memberRegions.set(member, region);
+  }
+  return region;
+}
+
+function memberSlots(members: Component[], memberLines: string[][]): MemberSlot[] {
+  let top = 0;
+  return memberLines.map((rows, member) => {
+    const slot = { region: mouseRegionOf(members[member]), top, height: rows.length };
+    top += rows.length;
+    return slot;
   });
-  return shown.map(({ component, message }, index) => {
-    const opens = message !== undefined && firstShown.get(message) === index;
-    const closes = message !== undefined && lastShown.get(message) === index;
-    return opens || closes ? new ResponseZone(component, opens, closes) : component;
-  });
+}
+
+class GroupBody implements Component {
+  private theme: Theme | undefined;
+  private members: Component[] = [];
+  private slots: MemberSlot[] = [];
+  private memberWidth = 1;
+  private drawing: { theme: Theme; memberLines: string[][]; lines: string[] } | undefined;
+
+  show(theme: Theme, members: Component[]): this {
+    this.theme = theme;
+    this.members = members;
+    return this;
+  }
+
+  render(width: number): string[] {
+    const theme = this.theme;
+    if (!theme) return [];
+    this.memberWidth = Math.max(1, width - TREE_WIDTH);
+    const memberLines = this.members.map((member) => member.render(this.memberWidth));
+    this.slots = memberSlots(this.members, memberLines);
+    if (this.drawing?.theme !== theme || !sameMemberLines(this.drawing.memberLines, memberLines)) {
+      this.drawing = { theme, memberLines, lines: drawTree(memberLines, theme) };
+    }
+    return this.drawing.lines;
+  }
+
+  handleMouse(event: TuiMouseEvent): ReturnType<MouseRegion["handleMouse"]> {
+    const slot = this.slots.find(({ top, height }) => event.y >= top && event.y < top + height);
+    return slot?.region.handleMouse({
+      ...event,
+      x: Math.max(0, event.x - TREE_WIDTH),
+      y: event.y - slot.top,
+      width: this.memberWidth,
+      height: slot.height,
+    });
+  }
+
+  invalidate(): void {}
 }
 
 class GroupExpansion {
@@ -487,7 +586,7 @@ export default function (pi: ExtensionAPI) {
   let transcriptViewport: { scrollView: ScrollView; contentHeight: number } | undefined;
   const currentTheme = () => currentUi()?.theme;
   const expansion = new GroupExpansion();
-  const groupBlocks = new WeakMap<GradientTool, ToolGroupBlock>();
+  const groupViews = new WeakMap<GradientTool, { header: ToolGroupBlock; body: GroupBody }>();
   const transcriptViews = new WeakMap<Container, Container>();
 
   pi.registerToolRenderer((_toolName, next) => {
@@ -525,21 +624,27 @@ export default function (pi: ExtensionAPI) {
     agentRunning = false;
   });
 
-  const groupBlock = (group: ToolGroup, theme: Theme, expanded: boolean): ToolGroupBlock => {
+  const viewsOf = (group: ToolGroup) => {
     const key = group.tools[0];
-    let block = groupBlocks.get(key);
-    if (!block) {
-      block = new ToolGroupBlock(() => expansion.toggle(key));
-      groupBlocks.set(key, block);
+    let views = groupViews.get(key);
+    if (!views) {
+      views = { header: new ToolGroupBlock(() => expansion.toggle(key)), body: new GroupBody() };
+      groupViews.set(key, views);
     }
-    return block.show(theme, groupSummary(group, theme, expanded), groupBackground(group, agentRunning));
+    return views;
+  };
+
+  const groupSegments = (entry: ShownGroup, theme: Theme, zoned: (item: TranscriptItem) => Component) => {
+    const { header, body } = viewsOf(entry.group);
+    header.show(theme, groupSummary(entry.group, theme, entry.expanded), groupBackground(entry.group, agentRunning));
+    return entry.expanded ? [header, body.show(theme, entry.members.map(zoned))] : [header];
   };
 
   const transcriptSegments = (container: Container, width: number, theme: Theme): Component[] => {
     expansion.follow(currentUi()?.getToolsExpanded() ?? false);
     const items = container.children.flatMap(itemsOf);
     const groupsByStart = new Map(toolGroups(items, width).map((group) => [group.start, group]));
-    const shown: TranscriptItem[] = [];
+    const shown: (TranscriptItem | ShownGroup)[] = [];
     for (let index = 0; index < items.length; index++) {
       const group = groupsByStart.get(index);
       if (!group) {
@@ -547,11 +652,12 @@ export default function (pi: ExtensionAPI) {
         continue;
       }
       const expanded = expansion.isExpanded(group.tools[0]);
-      shown.push({ kind: "content", component: groupBlock(group, theme, expanded) });
-      if (expanded) shown.push(...spacedFromHeader(items.slice(group.start, group.end + 1)));
+      const members = expanded ? spacedFromHeader(items.slice(group.start, group.end + 1)) : [];
+      shown.push({ group, expanded, members });
       index = group.end;
     }
-    return withResponseZones(shown);
+    const zoned = responseZones(shown.flatMap((entry) => ("group" in entry ? entry.members : [entry])));
+    return shown.flatMap((entry) => ("group" in entry ? groupSegments(entry, theme, zoned) : [zoned(entry)]));
   };
 
   const prototype = ToolExecutionComponent.prototype as unknown as Record<symbol, unknown> & GradientTool;
