@@ -8,7 +8,6 @@ buildGoModule {
   version = "0.1.0";
   src = lib.cleanSource ./.;
   vendorHash = null;
-  doCheck = false;
   subPackages = [ "." ];
   env.CGO_ENABLED = 0;
   ldflags = [
