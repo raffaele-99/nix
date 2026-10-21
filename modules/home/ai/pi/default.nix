@@ -44,6 +44,8 @@ in
       ".pi/agent/extensions/subagent.ts".source = ../../../pkgs/pi/extensions/subagent.ts;
       ".pi/agent/extensions/web-fetch.ts".source = ../../../pkgs/pi/extensions/web-fetch.ts;
       ".pi/agent/extensions/web-search.ts".source = ../../../pkgs/pi/extensions/web-search.ts;
+      ".pi/agent/themes/slate-dark.json".source = ../../../pkgs/pi/themes/slate-dark.json;
+      ".pi/agent/themes/slate-light.json".source = ../../../pkgs/pi/themes/slate-light.json;
     };
   };
 }
