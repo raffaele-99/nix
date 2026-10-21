@@ -321,16 +321,38 @@ func (a application) execute(ctx context.Context, cfg configuration, o options) 
 	if !activating {
 		return nil
 	}
-	// Use the rebuild package exported by the selected flake, not an
-	// unrelated registry revision. Both evaluations receive the overrides.
-	args = append([]string{"run", ".#darwin-rebuild"}, cfg.evaluationFlags()...)
-	args = append(args, "--", "switch", "--flake", ".#"+cfg.Host, "--show-trace")
-	args = append(args, cfg.evaluationFlags()...)
-	command := nixCommand(cfg.BuildFlake, args...)
-	command.program = "/usr/bin/sudo"
-	command.args = append([]string{"-H", "--", "nix"}, command.args...)
-	_, err = a.command(ctx, command, false)
-	return err
+	// All flake evaluation and fetching happen above as the invoking user.
+	// Register and activate that exact build; root needs no Git credentials.
+	system := filepath.Join(cfg.BuildFlake, "result")
+	if !a.dryRun {
+		system, err = filepath.EvalSymlinks(system)
+		if err != nil {
+			return fmt.Errorf("resolve built system: %w", err)
+		}
+	}
+	nixEnv, err := exec.LookPath("nix-env")
+	if err != nil {
+		return err
+	}
+	for _, command := range activationCommands(cfg.BuildFlake, system, nixEnv) {
+		if _, err := a.command(ctx, command, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func activationCommands(dir, system, nixEnv string) []invocation {
+	return []invocation{
+		{
+			dir: dir, program: "/usr/bin/sudo",
+			args: []string{"-H", "--", nixEnv, "--profile", "/nix/var/nix/profiles/system", "--set", system},
+		},
+		{
+			dir: dir, program: "/usr/bin/sudo",
+			args: []string{"-H", "--", filepath.Join(system, "sw/bin/darwin-rebuild"), "activate"},
+		},
+	}
 }
 
 func (a application) clean(ctx context.Context) error {
