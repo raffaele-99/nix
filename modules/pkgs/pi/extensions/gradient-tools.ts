@@ -5,6 +5,7 @@ import {
   Theme,
   type ThemeBg,
   ToolExecutionComponent,
+  UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
 import {
   backgroundAnsi,
@@ -17,6 +18,7 @@ import {
   mixColors,
   ScrollView,
   Spacer,
+  sliceByColumn,
   stripTerminalSequences,
   Text,
   TuiAltScreen,
@@ -53,14 +55,14 @@ const PADDING_ROWS = 1;
 const ROW_HEIGHT_IN_COLUMNS = 2;
 const PADDING_COLUMNS = PADDING_ROWS * ROW_HEIGHT_IN_COLUMNS;
 
-const COLLAPSED_GROUP = "▸";
-const EXPANDED_GROUP = "▾";
-const TREE_INDENT = " ".repeat(PADDING_COLUMNS);
+const ASSISTANT_MARK = "•";
+const USER_MARK = "›";
+const MARK_WIDTH = 2;
+const DEFAULT_OUTPUT_PAD = 1;
 const TREE_BRANCH = "├─ ";
 const TREE_LAST_BRANCH = "└─ ";
 const TREE_TRUNK = "│  ";
 const TREE_GAP = "   ";
-const TREE_WIDTH = TREE_INDENT.length + TREE_BRANCH.length;
 const RESPONSE_ZONE_START = "\x1b]133;A\x07";
 const RESPONSE_ZONE_END = "\x1b]133;B\x07\x1b]133;C\x07";
 const RESPONSE_ZONE_MARKS = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
@@ -92,6 +94,12 @@ type Gutter = (member: number, row: number) => string;
 type MemberSlot = { region: MouseRegion; top: number; height: number };
 
 type ColumnRange = { start: number; end: number };
+
+type Columns = { mark: number; content: number };
+
+type DecoratedComponent = Component & { decorationAt?(row: number): number };
+
+type RenderedTranscript = { view: Container; width: number; lines: string[]; decorations?: number[] };
 
 type SelectionBounds = { start: { scrollView?: ScrollView }; end: { scrollView?: ScrollView } };
 
@@ -130,6 +138,7 @@ const paddedBlocks = new WeakMap<object, PaddedBlock>();
 const boxContents = new WeakMap<Box, Component>();
 const unboxedBoxes = new WeakMap<Component, Box>();
 const memberRegions = new WeakMap<Component, MouseRegion>();
+const markedParts = new WeakMap<Component, MarkedPart>();
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -271,7 +280,7 @@ function paintBehindContent(line: string, width: number, ramp: string[]): string
   return out + RESET_BACKGROUND;
 }
 
-function paintRows(owner: object, rows: string[], width: number, ramp: string[]): string[] {
+function paintBlock(owner: object, content: string[], width: number, ramp: string[]): string[] {
   const previous = paintCaches.get(owner);
   const cached = previous?.ramp === ramp ? previous.lines : undefined;
   const painted = new Map<string, string>();
@@ -283,14 +292,10 @@ function paintRows(owner: object, rows: string[], width: number, ramp: string[])
     return output;
   };
 
-  const block = rows.map(paint);
+  const paddingRows = Array<string>(PADDING_ROWS).fill("");
+  const block = [...paddingRows, ...content, ...paddingRows].map(paint);
   paintCaches.set(owner, { ramp, lines: painted });
   return block;
-}
-
-function paintBlock(owner: object, content: string[], width: number, ramp: string[]): string[] {
-  const paddingRows = Array<string>(PADDING_ROWS).fill("");
-  return paintRows(owner, [...paddingRows, ...content, ...paddingRows], width, ramp);
 }
 
 function isBlank(line: string): boolean {
@@ -334,8 +339,8 @@ function isGradientTool(component: Component): component is GradientTool {
   );
 }
 
-function holdsGradientTools(container: Container): boolean {
-  return container.children.some(isGradientTool);
+function holdsTranscript(container: Container): boolean {
+  return container.children.some((child) => isGradientTool(child) || isConversation(child));
 }
 
 function messageParts(message: AssistantMessageComponent): Component[] | undefined {
@@ -367,9 +372,14 @@ function isWork(item: TranscriptItem): boolean {
   return item.kind === "tool" || item.kind === "thought";
 }
 
+function isConversation(component: Component): boolean {
+  return component instanceof UserMessageComponent || component instanceof AssistantMessageComponent;
+}
+
 function isGap(item: TranscriptItem, width: number): boolean {
   if (item.kind === "spacer" || item.kind === "notice") return true;
-  return item.kind === "content" && item.component.render(width).length === 0;
+  if (item.kind !== "content" || item.message || isConversation(item.component)) return false;
+  return item.component.render(width).length === 0;
 }
 
 function runStart(items: TranscriptItem[], firstWork: number, boundary: number, width: number): number {
@@ -432,16 +442,14 @@ function failedCalls(group: ToolGroup): number {
   return group.tools.filter((tool) => !tool.isPartial && tool.result?.isError).length;
 }
 
-function groupSummary(group: ToolGroup, theme: Theme, expanded: boolean): string {
-  const marker = theme.fg("dim", expanded ? EXPANDED_GROUP : COLLAPSED_GROUP);
+function groupSummary(group: ToolGroup, theme: Theme): string {
   const failures = failedCalls(group);
   const status = failures === 0 ? "" : theme.fg("dim", RESULT_SEPARATOR) + theme.fg("error", `${failures} failed`);
-  return `${marker} ${theme.fg("toolTitle", theme.bold(groupActivity(group)))}${status}`;
+  return theme.fg("toolTitle", theme.bold(groupActivity(group))) + status;
 }
 
-function groupBackground(group: ToolGroup, agentRunning: boolean): ThemeBg {
-  const working = group.tools.some((tool) => tool.isPartial) || (agentRunning && group.trailing);
-  return working ? "toolPendingBg" : "toolSuccessBg";
+function isLive(group: ToolGroup, agentRunning: boolean): boolean {
+  return group.tools.some((tool) => tool.isPartial) || (agentRunning && group.trailing);
 }
 
 function isFinalResponse(message: AssistantMessageComponent): boolean {
@@ -449,13 +457,19 @@ function isFinalResponse(message: AssistantMessageComponent): boolean {
 }
 
 class ResponseZone extends MouseRegion {
+  private readonly part: DecoratedComponent;
   private readonly opens: boolean;
   private readonly closes: boolean;
 
   constructor(part: Component, opens: boolean, closes: boolean) {
     super(part, () => undefined);
+    this.part = part;
     this.opens = opens;
     this.closes = closes;
+  }
+
+  decorationAt(row: number): number {
+    return this.part.decorationAt?.(row) ?? 0;
   }
 
   override render(width: number): string[] {
@@ -467,7 +481,109 @@ class ResponseZone extends MouseRegion {
   }
 }
 
-function responseZones(shown: TranscriptItem[]): (item: TranscriptItem) => Component {
+function insertAt(line: string, column: number, text: string): string {
+  const zoneMarks = line.match(RESPONSE_ZONE_MARKS)?.[0] ?? "";
+  const content = line.slice(zoneMarks.length);
+  const before = sliceByColumn(content, 0, column, true);
+  const gap = " ".repeat(Math.max(0, column - visibleWidth(before)));
+  return zoneMarks + before + gap + text + sliceByColumn(content, column, Number.MAX_SAFE_INTEGER, true);
+}
+
+class MarkedPart extends MouseRegion {
+  private column = 0;
+  private firstMark = "";
+  private otherMark = "";
+  private drawn: { width: number; marks: string; source: string[]; lines: string[] } | undefined;
+
+  constructor(part: Component) {
+    super(part, () => undefined);
+  }
+
+  place(column: number, firstMark: string, otherMark: string): this {
+    this.column = column;
+    this.firstMark = firstMark;
+    this.otherMark = otherMark;
+    return this;
+  }
+
+  private get insertedWidth(): number {
+    return visibleWidth(this.otherMark);
+  }
+
+  decorationAt(): number {
+    return this.column + this.insertedWidth;
+  }
+
+  override render(width: number): string[] {
+    const source = super.render(Math.max(1, width - this.insertedWidth));
+    const marks = `${this.column}\n${this.firstMark}\n${this.otherMark}`;
+    const drawn = this.drawn;
+    if (drawn?.width === width && drawn.marks === marks && sameLines(drawn.source, source)) return drawn.lines;
+    const markedRow = source.findIndex((line) => !isBlank(line));
+    const mark = (row: number) => (row === markedRow ? this.firstMark : this.otherMark);
+    const lines = source.map((line, row) => insertAt(line, this.column, mark(row)));
+    this.drawn = { width, marks, source: [...source], lines };
+    return lines;
+  }
+
+  override handleMouse(event: TuiMouseEvent): ReturnType<MouseRegion["handleMouse"]> {
+    const inserted = this.insertedWidth;
+    const x = event.x < this.column ? event.x : Math.max(this.column, event.x - inserted);
+    return super.handleMouse({ ...event, x, width: Math.max(1, event.width - inserted) });
+  }
+}
+
+function markedPartOf(component: Component): MarkedPart {
+  let part = markedParts.get(component);
+  if (!part) {
+    part = new MarkedPart(component);
+    markedParts.set(component, part);
+  }
+  return part;
+}
+
+function outputPadOf(component: Component): number | undefined {
+  const { outputPad } = component as unknown as { outputPad?: unknown };
+  return typeof outputPad === "number" ? outputPad : undefined;
+}
+
+function columnsOf(items: TranscriptItem[]): Columns {
+  for (const item of items) {
+    const mark = outputPadOf(item.message ?? item.component);
+    if (mark !== undefined) return { mark, content: mark + MARK_WIDTH };
+  }
+  return { mark: DEFAULT_OUTPUT_PAD, content: DEFAULT_OUTPUT_PAD + MARK_WIDTH };
+}
+
+function continuesBlock(item: TranscriptItem, previous: TranscriptItem | ShownGroup | undefined): boolean {
+  if (!previous || "group" in previous) return false;
+  return previous.message === item.message && previous.kind !== "spacer";
+}
+
+function leadingMark(
+  item: TranscriptItem,
+  previous: TranscriptItem | ShownGroup | undefined,
+  theme: Theme,
+  columns: Columns,
+): Component {
+  const blank = " ".repeat(MARK_WIDTH);
+  if (item.component instanceof UserMessageComponent) {
+    return markedPartOf(item.component).place(columns.mark, `${theme.fg("muted", USER_MARK)} `, blank);
+  }
+  if (item.message && item.kind !== "spacer") {
+    const bullet = continuesBlock(item, previous) ? blank : `${theme.fg("dim", ASSISTANT_MARK)} `;
+    return markedPartOf(item.component).place(columns.mark, bullet, blank);
+  }
+  if (item.kind === "notice") {
+    const { paddingX } = item.component as unknown as { paddingX?: unknown };
+    const textColumn = typeof paddingX === "number" ? paddingX : 0;
+    const indent = " ".repeat(Math.max(0, columns.content - textColumn));
+    return markedPartOf(item.component).place(textColumn, indent, indent);
+  }
+  return item.component;
+}
+
+function responseZones(shown: TranscriptItem[]): (item: TranscriptItem, component?: Component) => Component {
   const firstShown = new Map<AssistantMessageComponent, TranscriptItem>();
   const lastShown = new Map<AssistantMessageComponent, TranscriptItem>();
   for (const item of shown) {
@@ -475,14 +591,14 @@ function responseZones(shown: TranscriptItem[]): (item: TranscriptItem) => Compo
     if (!firstShown.has(item.message)) firstShown.set(item.message, item);
     lastShown.set(item.message, item);
   }
-  return (item) => {
+  return (item, component = item.component) => {
     const opens = item.message !== undefined && firstShown.get(item.message) === item;
     const closes = item.message !== undefined && lastShown.get(item.message) === item;
-    return opens || closes ? new ResponseZone(item.component, opens, closes) : item.component;
+    return opens || closes ? new ResponseZone(component, opens, closes) : component;
   };
 }
 
-function treeGutter(members: GroupMember[], memberLines: string[][], theme: Theme): Gutter {
+function treeGutter(members: GroupMember[], memberLines: string[][], theme: Theme, indent: number): Gutter {
   const branchRow = (lines: string[], member: number) =>
     members[member].branches ? lines.findIndex((line) => !isBlank(line)) : -1;
   const branchRows = memberLines.map(branchRow);
@@ -492,7 +608,7 @@ function treeGutter(members: GroupMember[], memberLines: string[][], theme: Them
     if (row === branchRows[member]) return member === lastBranch ? TREE_LAST_BRANCH : TREE_BRANCH;
     return member === lastBranch && row > branchRows[member] ? TREE_GAP : TREE_TRUNK;
   };
-  return (member, row) => TREE_INDENT + theme.fg("dim", glyph(member, row));
+  return (member, row) => " ".repeat(indent) + theme.fg("dim", glyph(member, row));
 }
 
 function behindGutter(gutter: string, line: string): string {
@@ -500,32 +616,41 @@ function behindGutter(gutter: string, line: string): string {
   return zoneMarks + gutter + line.slice(zoneMarks.length);
 }
 
-function drawTree(members: GroupMember[], memberLines: string[][], theme: Theme): string[] {
-  const gutter = treeGutter(members, memberLines, theme);
+function drawTree(members: GroupMember[], memberLines: string[][], theme: Theme, indent: number): string[] {
+  const gutter = treeGutter(members, memberLines, theme, indent);
   return memberLines.flatMap((rows, member) => rows.map((line, row) => behindGutter(gutter(member, row), line)));
 }
 
+function sameLines(previous: readonly string[], next: readonly string[]): boolean {
+  return previous.length === next.length && previous.every((line, row) => line === next[row]);
+}
+
 function sameMemberLines(previous: string[][], next: string[][]): boolean {
-  return (
-    previous.length === next.length &&
-    previous.every(
-      (rows, member) => rows.length === next[member].length && rows.every((line, row) => line === next[member][row]),
-    )
-  );
+  return previous.length === next.length && previous.every((rows, member) => sameLines(rows, next[member]));
 }
 
-function treeGutterWidth(line: string, theme: Theme): number {
-  const content = line.replace(RESPONSE_ZONE_MARKS, "");
-  const glyphs = [TREE_BRANCH, TREE_LAST_BRANCH, TREE_TRUNK, TREE_GAP];
-  return glyphs.some((glyph) => content.startsWith(TREE_INDENT + theme.fg("dim", glyph))) ? TREE_WIDTH : 0;
+function rowDecorations(transcript: RenderedTranscript): number[] {
+  const decorations: number[] = [];
+  for (const segment of transcript.view.children as DecoratedComponent[]) {
+    const height = segment.render(transcript.width).length;
+    for (let row = 0; row < height; row++) decorations.push(segment.decorationAt?.(row) ?? 0);
+  }
+  return decorations;
 }
 
-function textColumns(line: string, theme: Theme): ColumnRange | undefined {
-  const gutter = treeGutterWidth(line, theme);
-  const text = stripTerminalSequences(line).slice(gutter);
+function decorationAt(transcript: RenderedTranscript | undefined, lines: readonly string[], row: number): number {
+  if (!transcript) return 0;
+  const transcriptRow = row - (lines.length - transcript.lines.length);
+  if (transcriptRow < 0 || lines[row] !== transcript.lines[transcriptRow]) return 0;
+  transcript.decorations ??= rowDecorations(transcript);
+  return transcript.decorations[transcriptRow] ?? 0;
+}
+
+function textColumns(line: string, decoration: number): ColumnRange | undefined {
+  const text = stripTerminalSequences(line).slice(decoration);
   const content = text.trim();
   if (!content) return undefined;
-  const start = gutter + visibleWidth(text.slice(0, text.length - text.trimStart().length));
+  const start = decoration + visibleWidth(text.slice(0, text.length - text.trimStart().length));
   return { start, end: start + visibleWidth(content) };
 }
 
@@ -538,11 +663,17 @@ function scrollBoxOf(box: LayoutBoxShape, scrollView: ScrollView): LayoutBoxShap
   return undefined;
 }
 
-function contentAt(layout: LayoutShape, selection: SelectionBounds, row: number, screenLine: string) {
+function scrollContentOf(layout: LayoutShape | undefined, selection: SelectionBounds) {
   const scrollView = selection.start.scrollView;
-  const box = scrollView ? scrollBoxOf(layout.root, scrollView) : undefined;
-  if (!scrollView || !box?.scrollContentLines) return { line: screenLine, offset: 0 };
-  return { line: box.scrollContentLines[scrollView.scrollTop + row - box.rect.y] ?? "", offset: box.rect.x };
+  const box = layout && scrollView ? scrollBoxOf(layout.root, scrollView) : undefined;
+  return scrollView && box?.scrollContentLines ? { scrollView, box, lines: box.scrollContentLines } : undefined;
+}
+
+function contentAt(layout: LayoutShape, selection: SelectionBounds, row: number, screenLine: string) {
+  const content = scrollContentOf(layout, selection);
+  if (!content) return { line: screenLine, offset: 0, row: -1, lines: [] as readonly string[] };
+  const contentRow = content.scrollView.scrollTop + row - content.box.rect.y;
+  return { line: content.lines[contentRow] ?? "", offset: content.box.rect.x, row: contentRow, lines: content.lines };
 }
 
 function highlightedColumns(columns: ColumnRange, text: ColumnRange | undefined, offset: number): ColumnRange {
@@ -550,8 +681,8 @@ function highlightedColumns(columns: ColumnRange, text: ColumnRange | undefined,
   return { start: Math.max(columns.start, offset + text.start), end: Math.min(columns.end, offset + text.end) };
 }
 
-function copiedColumns(columns: ColumnRange, line: string, theme: Theme): ColumnRange {
-  return { start: Math.max(columns.start, treeGutterWidth(line, theme)), end: columns.end };
+function copiedColumns(selected: ColumnRange, decoration: number): ColumnRange {
+  return { start: Math.max(selected.start, decoration), end: selected.end };
 }
 
 function mouseRegionOf(member: Component): MouseRegion {
@@ -576,32 +707,46 @@ class GroupBody implements Component {
   private theme: Theme | undefined;
   private members: GroupMember[] = [];
   private slots: MemberSlot[] = [];
+  private indent = 0;
   private memberWidth = 1;
-  private drawing: { theme: Theme; memberLines: string[][]; lines: string[] } | undefined;
+  private drawing: { theme: Theme; indent: number; memberLines: string[][]; lines: string[] } | undefined;
 
-  show(theme: Theme, members: GroupMember[]): this {
+  show(theme: Theme, members: GroupMember[], indent: number): this {
     this.theme = theme;
     this.members = members;
+    this.indent = indent;
     return this;
+  }
+
+  private get gutterWidth(): number {
+    return this.indent + TREE_BRANCH.length;
+  }
+
+  decorationAt(): number {
+    return this.gutterWidth;
   }
 
   render(width: number): string[] {
     const theme = this.theme;
     if (!theme) return [];
-    this.memberWidth = Math.max(1, width - TREE_WIDTH);
+    this.memberWidth = Math.max(1, width - this.gutterWidth);
     const memberLines = this.members.map(({ component }) => component.render(this.memberWidth));
     this.slots = memberSlots(this.members, memberLines);
-    if (this.drawing?.theme !== theme || !sameMemberLines(this.drawing.memberLines, memberLines)) {
-      this.drawing = { theme, memberLines, lines: drawTree(this.members, memberLines, theme) };
+    const drawing = this.drawing;
+    const unchanged =
+      drawing?.theme === theme && drawing.indent === this.indent && sameMemberLines(drawing.memberLines, memberLines);
+    if (!unchanged) {
+      const lines = drawTree(this.members, memberLines, theme, this.indent);
+      this.drawing = { theme, indent: this.indent, memberLines, lines };
     }
-    return this.drawing.lines;
+    return this.drawing?.lines ?? [];
   }
 
   handleMouse(event: TuiMouseEvent): ReturnType<MouseRegion["handleMouse"]> {
     const slot = this.slots.find(({ top, height }) => event.y >= top && event.y < top + height);
     return slot?.region.handleMouse({
       ...event,
-      x: Math.max(0, event.x - TREE_WIDTH),
+      x: Math.max(0, event.x - this.gutterWidth),
       y: event.y - slot.top,
       width: this.memberWidth,
       height: slot.height,
@@ -635,25 +780,33 @@ class GroupExpansion {
 class ToolGroupBlock implements Component {
   private theme: Theme | undefined;
   private summary = "";
-  private background: ThemeBg = "toolSuccessBg";
+  private live = false;
+  private columns: Columns = { mark: DEFAULT_OUTPUT_PAD, content: DEFAULT_OUTPUT_PAD + MARK_WIDTH };
   private readonly onClick: () => void;
 
   constructor(onClick: () => void) {
     this.onClick = onClick;
   }
 
-  show(theme: Theme, summary: string, background: ThemeBg): this {
+  show(theme: Theme, summary: string, columns: Columns, live: boolean): this {
     this.theme = theme;
     this.summary = summary;
-    this.background = background;
+    this.columns = columns;
+    this.live = live;
     return this;
   }
 
   render(width: number): string[] {
     if (!this.theme) return [];
-    const line = truncateToWidth(this.summary, Math.max(1, width - 2 * PADDING_COLUMNS), ELLIPSIS);
-    const ramp = fadingBackgroundPerColumn(this.theme, this.background, width);
-    return ["", ...paintRows(this, [line], width, ramp)];
+    const bullet = this.theme.fg(this.live ? "accent" : "dim", ASSISTANT_MARK);
+    const mark = `${" ".repeat(this.columns.mark)}${bullet} `;
+    const room = Math.max(1, width - this.columns.content);
+    return ["", mark + truncateToWidth(this.summary, room, ELLIPSIS)];
+  }
+
+  decorationAt(row: number): number {
+    const onSpacerLine = row === 0;
+    return onSpacerLine ? 0 : this.columns.content;
   }
 
   handleMouse(event: TuiMouseEvent): { handled: true } | undefined {
@@ -668,8 +821,10 @@ class ToolGroupBlock implements Component {
 
 export default function (pi: ExtensionAPI) {
   let currentUi: () => ExtensionUIContext | undefined = () => undefined;
-  let agentRunning = false;
   let transcriptViewport: { scrollView: ScrollView; contentHeight: number } | undefined;
+  let transcriptColumns: Columns = { mark: DEFAULT_OUTPUT_PAD, content: DEFAULT_OUTPUT_PAD + MARK_WIDTH };
+  let renderedTranscript: RenderedTranscript | undefined;
+  let agentRunning = false;
   const currentTheme = () => currentUi()?.theme;
   const expansion = new GroupExpansion();
   const groupViews = new WeakMap<GradientTool, { header: ToolGroupBlock; body: GroupBody }>();
@@ -722,14 +877,15 @@ export default function (pi: ExtensionAPI) {
 
   const groupSegments = (entry: ShownGroup, theme: Theme, zoned: (item: TranscriptItem) => Component) => {
     const { header, body } = viewsOf(entry.group);
-    header.show(theme, groupSummary(entry.group, theme, entry.expanded), groupBackground(entry.group, agentRunning));
+    header.show(theme, groupSummary(entry.group, theme), transcriptColumns, isLive(entry.group, agentRunning));
     const members = entry.members.map((item) => ({ component: zoned(item), branches: isWork(item) }));
-    return entry.expanded ? [header, body.show(theme, members)] : [header];
+    return entry.expanded ? [header, body.show(theme, members, transcriptColumns.content)] : [header];
   };
 
   const transcriptSegments = (container: Container, width: number, theme: Theme): Component[] => {
     expansion.follow(currentUi()?.getToolsExpanded() ?? false);
     const items = container.children.flatMap(itemsOf);
+    transcriptColumns = columnsOf(items);
     const groupsByStart = new Map(toolGroups(items, width).map((group) => [group.start, group]));
     const shown: (TranscriptItem | ShownGroup)[] = [];
     for (let index = 0; index < items.length; index++) {
@@ -744,7 +900,10 @@ export default function (pi: ExtensionAPI) {
       index = group.end;
     }
     const zoned = responseZones(shown.flatMap((entry) => ("group" in entry ? entry.members : [entry])));
-    return shown.flatMap((entry) => ("group" in entry ? groupSegments(entry, theme, zoned) : [zoned(entry)]));
+    return shown.flatMap((entry, index) => {
+      if ("group" in entry) return groupSegments(entry, theme, zoned);
+      return [zoned(entry, leadingMark(entry, shown[index - 1], theme, transcriptColumns))];
+    });
   };
 
   const prototype = ToolExecutionComponent.prototype as unknown as Record<symbol, unknown> & GradientTool;
@@ -801,7 +960,7 @@ export default function (pi: ExtensionAPI) {
   containerPrototype[ORIGINAL_CONTAINER_HANDLE_MOUSE] = originalContainerHandleMouse;
 
   containerPrototype.render = function (this: Container, width: number): string[] {
-    const theme = holdsGradientTools(this) ? currentTheme() : undefined;
+    const theme = holdsTranscript(this) ? currentTheme() : undefined;
     if (!theme) {
       transcriptViews.delete(this);
       return originalContainerRender.call(this, width);
@@ -810,7 +969,9 @@ export default function (pi: ExtensionAPI) {
     const view = transcriptViews.get(this) ?? new Container();
     transcriptViews.set(this, view);
     view.children = transcriptSegments(this, width, theme);
-    return originalContainerRender.call(view, width);
+    const lines = originalContainerRender.call(view, width);
+    renderedTranscript = { view, width, lines };
+    return lines;
   };
 
   const keepClickedLineOnScreen = (event: TuiMouseEvent, growth: number) => {
@@ -875,10 +1036,12 @@ export default function (pi: ExtensionAPI) {
     maxColumn?: number,
   ) {
     const columns = originalSelectionColumns.call(this, line, row, selection, minColumn, maxColumn);
-    const theme = currentTheme();
-    if (!theme) return columns;
-    if (!paintedLayout) return copiedColumns(columns, line, theme);
+    if (!paintedLayout) {
+      const content = scrollContentOf(this.currentLayout, selection);
+      return copiedColumns(columns, content ? decorationAt(renderedTranscript, content.lines, row) : 0);
+    }
     const content = contentAt(paintedLayout, selection, row, line);
-    return highlightedColumns(columns, textColumns(content.line, theme), content.offset);
+    const decoration = decorationAt(renderedTranscript, content.lines, content.row);
+    return highlightedColumns(columns, textColumns(content.line, decoration), content.offset);
   };
 }
