@@ -7,7 +7,6 @@
     ./glow.nix
     ./rectangle.nix
     ./luca.nix
-    ./ai/pi
   ];
 
   programs.git = {

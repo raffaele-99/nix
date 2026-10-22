@@ -56,7 +56,6 @@
           ./modules/darwin
         ];
         home-manager.sharedModules = [ self.homeModules.default ];
-        home-manager.extraSpecialArgs.sharedNixpkgsRev = nixpkgs.rev;
         nixpkgs.overlays = [ caidoOverlay ];
       };
 
@@ -91,11 +90,7 @@
       packages.aarch64-darwin.bx = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bx { };
       packages.aarch64-darwin.bxs = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bxs { };
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
-      packages.aarch64-darwin.pi = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/pi {
-        nixpkgsRev = nixpkgs.rev;
-        onePasswordCli = darwinPkgs._1password-cli;
-        realPi = nixpkgs.legacyPackages.aarch64-darwin.pi-coding-agent;
-      };
+      packages.aarch64-darwin.pi = darwinPkgs.callPackage ./modules/pkgs/pi { nixpkgsRev = nixpkgs.rev; };
       packages.aarch64-darwin.pi2 = pi2.packages.aarch64-darwin.default;
       apps.aarch64-darwin.pi2 = {
         type = "app";

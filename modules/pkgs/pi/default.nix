@@ -13,9 +13,9 @@
   coreutils,
   gnused,
   gawk,
+  _1password-cli,
+  pi-coding-agent,
   nixpkgsRev,
-  onePasswordCli,
-  realPi,
   bxs ? callPackage ../../../pkgs/bxs { },
   sandboxToolsets ? import ./toolsets,
 }:
@@ -27,13 +27,24 @@ let
     builtins.hashString "sha256" "${nixpkgsRev}:${builtins.readFile ./image.nix}"
   );
   imageName = "luca/pi-sandbox";
-  imageTag = "${realPi.version}-${imageRevision}";
+  imageTag = "${pi-coding-agent.version}-${imageRevision}";
   imageRef = "${imageName}:${imageTag}";
   toolsetsKey = builtins.substring 0 16 (
     builtins.hashString "sha256" (
       nixpkgsRev + lib.concatMapStrings (path: "${path}") (lib.attrValues sandboxToolsets)
     )
   );
+
+  # SYSTEM.md, extensions and themes are part of the package. The wrapper passes
+  # them to pi as flags instead of installing them into ~/.pi/agent.
+  agentConfig = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./SYSTEM.md
+      ./extensions
+      ./themes
+    ];
+  };
 
   sandboxGuidelines = writeText "pi-sandbox-guidelines.md" "- You can use `uv` if you need pip packages.";
 
@@ -141,7 +152,7 @@ let
                         if key in PASSTHROUGH_ENV and isinstance(value, str):
                             env[key] = value
                     completed = subprocess.run(
-                        ["${onePasswordCli}/bin/op", *args],
+                        ["${_1password-cli}/bin/op", *args],
                         input=stdin,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
@@ -241,6 +252,7 @@ let
       ssh_agent=false
       op_socket=false
       no_cwd=false
+      no_extensions=false
       passthrough=false
       caido_url=""
       caido_container_url=""
@@ -285,6 +297,11 @@ let
             ;;
           --no-cwd)
             no_cwd=true
+            shift
+            ;;
+          --no-extensions | -ne)
+            no_extensions=true
+            pi_args+=("$1")
             shift
             ;;
           --caido-url)
@@ -369,9 +386,26 @@ let
         mv -f "$temporary" "$destination"
       }
 
+      # Prepends the packaged configuration, located at $1 as pi sees it.
+      # Package subcommands such as `pi install` must stay the first argument.
+      add_agent_config() {
+        local root="$1" name
+        case "''${pi_args[0]:-}" in
+          install | uninstall | remove | update | list | config | mcp) return ;;
+        esac
+        local args=(--system-prompt "$root/SYSTEM.md" --theme "$root/themes")
+        if ! $no_extensions; then
+          for name in ${lib.escapeShellArgs (lib.attrNames (builtins.readDir ./extensions))}; do
+            args+=(-e "$root/extensions/$name")
+          done
+        fi
+        pi_args=("''${args[@]}" "''${pi_args[@]}")
+      }
+
       state_root="$HOME/.cache/pi-sandbox"
 
       if ! $sandbox; then
+        add_agent_config ${agentConfig}
         if $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} > 0 )); then
           echo "pi: --docker-socket, --ssh-agent, --op-socket and --tools require --sandbox" >&2
           exit 2
@@ -401,7 +435,7 @@ let
         if $no_cwd; then
           pi_args=(-e ${./no-cwd.ts} "''${pi_args[@]}")
         fi
-        exec ${realPi}/bin/pi "''${pi_args[@]}"
+        exec ${pi-coding-agent}/bin/pi "''${pi_args[@]}"
       fi
 
       command -v docker >/dev/null || {
@@ -477,12 +511,16 @@ let
         fi
       }
 
-      for name in SYSTEM.md APPEND_SYSTEM.md settings.json models.json trust.json extensions skills prompts themes; do
+      for name in APPEND_SYSTEM.md settings.json models.json trust.json extensions skills prompts themes; do
         copy_agent_item "$name"
       done
 
+      cp -R ${agentConfig} "$agent_dir/packaged"
+      chmod -R u+w "$agent_dir/packaged"
+      add_agent_config /root/.pi/agent/packaged
+
       add_sandbox_guidelines() {
-        local system_prompt="$agent_dir/SYSTEM.md"
+        local system_prompt="$agent_dir/packaged/SYSTEM.md"
         [[ -f "$system_prompt" ]] || return 0
         ${gawk}/bin/awk -v guidelines="$(cat ${sandboxGuidelines})" \
           '/<\/guidelines>/ { print guidelines } { print }' "$system_prompt" > "$system_prompt.new"
@@ -673,16 +711,16 @@ let
   };
 in
 symlinkJoin {
-  name = "pi-sandbox-${realPi.version}";
+  name = "pi-sandbox-${pi-coding-agent.version}";
   paths = [
-    realPi
+    pi-coding-agent
     wrapper
   ];
   postBuild = ''
     rm -f "$out/bin/pi"
     ln -s ${wrapper}/bin/pi "$out/bin/pi"
   '';
-  meta = realPi.meta // {
+  meta = pi-coding-agent.meta // {
     description = "Pi coding agent with an opt-in Docker sandbox";
     mainProgram = "pi";
     platforms = lib.platforms.darwin;
