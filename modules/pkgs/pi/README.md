@@ -52,7 +52,7 @@ everything else passes through to pi
 - `git add -N modules/pkgs/pi/toolsets/NAME`
 - `luca build`
 - rebuild after any toolset change, definitions copied in at build time
-- host-specific: `programs.pi.sandboxToolsets.NAME = /path`
+- host-specific: override the package's `sandboxToolsets` argument
 
 ### re
 

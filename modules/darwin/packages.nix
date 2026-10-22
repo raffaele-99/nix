@@ -28,6 +28,7 @@
       vultr-cli
       (callPackage ../../pkgs/bx { })
       (callPackage ../../pkgs/bxs { })
+      (callPackage ../pkgs/pi { nixpkgsRev = config.system.nixpkgsRevision; })
 
       # xcvbjkepe
       nixfmt
