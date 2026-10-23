@@ -13,7 +13,7 @@ macos pi wrapper to handle sandboxing and stuff
 - needs docker
 - image built on first use
 - cwd mounted at `/workspace`, `.git` read-only
-- pi config and sessions mapped in; `auth.json` stays on the host, so providers logged in there (e.g. anthropic, openai-codex, openrouter) don't work in the sandbox
+- pi config, auth, sessions mapped in
 - read-only root, no caps, no-new-privileges
 - `web_search` goes through `bxs serve` on the host; `bx`, `bxs` and the api key stay on the host
 - host loopback services keep their addresses: ports of loopback `models.json` providers (e.g. `rec serve`), a loopback `--caido-url` and `--expose` urls are relayed to the host

@@ -645,9 +645,7 @@ let
         fi
       }
 
-      # auth.json stays on the host. models-store.json is a copy: its model
-      # baseUrls are trusted, so a writable one could redirect host credentials.
-      for name in APPEND_SYSTEM.md settings.json models.json models-store.json trust.json extensions skills prompts themes; do
+      for name in APPEND_SYSTEM.md settings.json models.json trust.json extensions skills prompts themes; do
         copy_agent_item "$name"
       done
 
@@ -716,6 +714,14 @@ let
         docker_args+=(--mount "type=bind,src=$workspace/.git,dst=/workspace/.git,readonly")
       fi
 
+      if [[ -f "$host_agent/auth.json" ]]; then
+        : > "$agent_dir/auth.json"
+        docker_args+=(--mount "type=bind,src=$host_agent/auth.json,dst=/root/.pi/agent/auth.json")
+      fi
+      if [[ -f "$host_agent/models-store.json" ]]; then
+        : > "$agent_dir/models-store.json"
+        docker_args+=(--mount "type=bind,src=$host_agent/models-store.json,dst=/root/.pi/agent/models-store.json")
+      fi
       if [[ -n "$caido_url" ]]; then
         docker_args+=(
           --env "HTTP_PROXY=$caido_url"
