@@ -16,7 +16,6 @@
   _1password-cli,
   pi-coding-agent,
   nixpkgsRev,
-  bxs ? callPackage ../bxs { },
   sandboxToolsets ? import ./toolsets,
 }:
 assert lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (
@@ -229,126 +228,6 @@ let
     print("\t".join((host_url, cache_key, relay_port)))
   '';
 
-  # models.json is written for the host. A provider served from the host's
-  # loopback, such as `rec serve`, is a host service: the sandbox relays its
-  # port (printed here) to the host, so its URL works unchanged, and its
-  # `!command` API key and headers run here, where the server and its
-  # credentials live. Other providers keep their commands, which run in the
-  # container as before.
-  sandboxModels = writeText "pi-sandbox-models.py" ''
-    import ipaddress
-    import json
-    import os
-    import re
-    import subprocess
-    import sys
-    import tempfile
-    from urllib.parse import urlsplit
-
-    path = sys.argv[1]
-
-
-    def warn(message):
-        print(f"pi: {message}", file=sys.stderr)
-
-
-    # Accept what pi accepts: `//` comments and trailing commas (stripJsonComments).
-    def strip_json_comments(text):
-        text = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*', lambda m: m[0] if m[0][0] == '"' else "", text)
-        return re.sub(r'"(?:\\.|[^"\\])*"|,(\s*[}\]])', lambda m: m[0] if m[1] is None else m[1], text)
-
-
-    def loopback_port(url):
-        if not isinstance(url, str):
-            return None
-        try:
-            parsed = urlsplit(url)
-            hostname, port = parsed.hostname, parsed.port
-        except ValueError:
-            return None
-        if not hostname:
-            return None
-        is_loopback = hostname == "localhost"
-        try:
-            is_loopback = is_loopback or ipaddress.ip_address(hostname).is_loopback
-        except ValueError:
-            pass
-        if not is_loopback:
-            return None
-        return port or (443 if parsed.scheme.lower() == "https" else 80)
-
-
-    # pi reads `$NAME` as an environment variable and a leading `!` as a command.
-    def literal(value):
-        value = value.replace("$", "$$")
-        return "$" + value if value.startswith("!") else value
-
-
-    # Resolves a `!command` value the way pi does: sh, stdout trimmed, 10s timeout.
-    def resolve_on_host(value, description):
-        if not isinstance(value, str) or not value.startswith("!"):
-            return value
-        try:
-            completed = subprocess.run(
-                value[1:],
-                shell=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                timeout=10,
-                check=False,
-            )
-            output = completed.stdout.decode("utf-8", "replace").strip() if completed.returncode == 0 else ""
-        except (OSError, subprocess.SubprocessError):
-            output = ""
-        if not output:
-            warn(f"could not resolve {description} on the host from: {value[1:]}")
-            return value
-        return literal(output)
-
-
-    def objects(value):
-        values = value.values() if isinstance(value, dict) else value if isinstance(value, list) else []
-        return [item for item in values if isinstance(item, dict)]
-
-
-    try:
-        with open(path, encoding="utf-8-sig") as file:
-            config = json.loads(strip_json_comments(file.read()))
-    except (OSError, ValueError) as error:
-        warn(f"cannot adapt models.json for the sandbox, using it unchanged: {error}")
-        raise SystemExit(0)
-
-    providers = config.get("providers") if isinstance(config, dict) else None
-    original = json.dumps(config)
-    ports = set()
-    for provider_id, provider in (providers.items() if isinstance(providers, dict) else []):
-        if not isinstance(provider, dict):
-            continue
-        scopes = [provider, *objects(provider.get("models"))]
-        provider_ports = {port for port in (loopback_port(scope.get("baseUrl")) for scope in scopes) if port}
-        if not provider_ports:
-            continue
-        ports |= provider_ports
-        label = f'provider "{provider_id}"'
-        if "apiKey" in provider:
-            provider["apiKey"] = resolve_on_host(provider["apiKey"], f"API key for {label}")
-        for scope in [*scopes, *objects(provider.get("modelOverrides"))]:
-            headers = scope.get("headers")
-            if isinstance(headers, dict):
-                for name, value in headers.items():
-                    headers[name] = resolve_on_host(value, f'{label} header "{name}"')
-
-    if json.dumps(config) != original:
-        # Replace the copy: it may be read-only, and now holds resolved secrets.
-        descriptor, temporary = tempfile.mkstemp(prefix=".models.json.", dir=os.path.dirname(path))
-        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
-            json.dump(config, file, indent=2)
-            file.write("\n")
-        os.replace(temporary, path)
-    print(*sorted(ports))
-  '';
-
   wrapper = writeShellApplication {
     name = "pi";
     runtimeInputs = [
@@ -530,13 +409,39 @@ let
         local args=(--system-prompt "$root/SYSTEM.md" --theme "$root/themes")
         if ! $no_extensions; then
           for name in ${lib.escapeShellArgs (lib.attrNames (builtins.readDir ./extensions))}; do
-            args+=(-e "$root/extensions/$name")
+            if [[ -e "$root/extensions/$name" ]]; then
+              args+=(-e "$root/extensions/$name")
+            fi
           done
         fi
         pi_args=("''${args[@]}" "''${pi_args[@]}")
       }
 
       state_root="$HOME/.cache/pi-sandbox"
+
+      # pi's own requests go through Caido, trusting its CA.
+      route_pi_through_caido() {
+        local caido_dir="$state_root/caido/$caido_cache_key"
+        mkdir -p "$caido_dir"
+        chmod 700 "$state_root/caido" "$caido_dir"
+        caido_certificate="$caido_dir/ca.crt"
+        caido_bundle="$caido_dir/ca-bundle.crt"
+        fetch_caido_certificate "$caido_certificate"
+        build_caido_bundle "$caido_certificate" "$caido_bundle"
+        export HTTP_PROXY="$caido_url"
+        export HTTPS_PROXY="$caido_url"
+        export http_proxy="$caido_url"
+        export https_proxy="$caido_url"
+        export NO_PROXY=""
+        export no_proxy=""
+        export SSL_CERT_FILE="$caido_bundle"
+        export NIX_SSL_CERT_FILE="$caido_bundle"
+        export NODE_EXTRA_CA_CERTS="$caido_bundle"
+        export CURL_CA_BUNDLE="$caido_bundle"
+        export GIT_SSL_CAINFO="$caido_bundle"
+        export REQUESTS_CA_BUNDLE="$caido_bundle"
+        pi_args=(-e ${./caido-openrouter.ts} "''${pi_args[@]}")
+      }
 
       if ! $sandbox; then
         add_agent_config ${agentConfig}
@@ -545,26 +450,7 @@ let
           exit 2
         fi
         if [[ -n "$caido_url" ]]; then
-          caido_dir="$state_root/caido/$caido_cache_key"
-          mkdir -p "$caido_dir"
-          chmod 700 "$state_root/caido" "$caido_dir"
-          caido_certificate="$caido_dir/ca.crt"
-          caido_bundle="$caido_dir/ca-bundle.crt"
-          fetch_caido_certificate "$caido_certificate"
-          build_caido_bundle "$caido_certificate" "$caido_bundle"
-          export HTTP_PROXY="$caido_url"
-          export HTTPS_PROXY="$caido_url"
-          export http_proxy="$caido_url"
-          export https_proxy="$caido_url"
-          export NO_PROXY=""
-          export no_proxy=""
-          export SSL_CERT_FILE="$caido_bundle"
-          export NIX_SSL_CERT_FILE="$caido_bundle"
-          export NODE_EXTRA_CA_CERTS="$caido_bundle"
-          export CURL_CA_BUNDLE="$caido_bundle"
-          export GIT_SSL_CAINFO="$caido_bundle"
-          export REQUESTS_CA_BUNDLE="$caido_bundle"
-          pi_args=(-e ${./caido-openrouter.ts} "''${pi_args[@]}")
+          route_pi_through_caido
         fi
         if $no_cwd; then
           pi_args=(-e ${./no-cwd.ts} "''${pi_args[@]}")
@@ -581,14 +467,27 @@ let
         exit 1
       }
 
+      workspace="$(pwd -P)"
+      host_agent="$HOME/.pi/agent"
+      # The workspace is the only host directory the agent can reach.
+      if [[ "$workspace" == / || "$host_agent/" == "$workspace"/* ]]; then
+        echo "pi: refusing to mount $workspace in the sandbox: it contains $host_agent" >&2
+        exit 2
+      fi
+
       mkdir -p "$state_root"
       session_dir="$(mktemp -d "$state_root/session.XXXXXX")"
       chmod 700 "$session_dir"
+      container="pi-sandbox-''${session_dir##*.}"
+      container_started=false
       relay_pids=()
 
       cleanup() {
         local status=$?
         trap - EXIT INT TERM HUP
+        if $container_started; then
+          docker rm -f "$container" >/dev/null 2>&1 || true
+        fi
         for pid in "''${relay_pids[@]}"; do
           kill "$pid" 2>/dev/null || true
           wait "$pid" 2>/dev/null || true
@@ -625,74 +524,38 @@ let
         }
       }
 
-      workspace="$(pwd -P)"
-      agent_dir="$session_dir/agent"
-      host_agent="$HOME/.pi/agent"
       session_key="''${workspace#/}"
       session_key="''${session_key//\//-}"
       session_key="''${session_key//:/-}"
       session_key="--$session_key--"
       host_session_dir="$host_agent/sandbox-sessions/$session_key"
-      mkdir -p "$agent_dir/sessions/--workspace--" "$host_session_dir"
+      mkdir -p "$host_session_dir"
       chmod 700 "$host_agent/sandbox-sessions" "$host_session_dir"
 
-      copy_agent_item() {
-        local name="$1"
-        if [[ -e "$host_agent/$name" ]]; then
-          cp -RL "$host_agent/$name" "$agent_dir/$name"
-        elif [[ -L "$host_agent/$name" ]]; then
-          echo "pi: skipping broken config symlink $host_agent/$name" >&2
-        fi
-      }
-
-      for name in APPEND_SYSTEM.md settings.json models.json trust.json extensions skills prompts themes; do
-        copy_agent_item "$name"
-      done
-
-      host_ports=()
-      if [[ -f "$agent_dir/models.json" ]]; then
-        if model_ports="$(${python3}/bin/python3 ${sandboxModels} "$agent_dir/models.json")"; then
-          read -r -a host_ports <<< "$model_ports"
-        else
-          echo "pi: could not adapt models.json for the sandbox; using it unchanged" >&2
-        fi
-      fi
-
-      cp -R ${agentConfig} "$agent_dir/packaged"
-      chmod -R u+w "$agent_dir/packaged"
-      add_agent_config /root/.pi/agent/packaged
+      # pi runs here, on the host, with its own config, credentials and
+      # sessions. Its tools run in the container (sandbox-tools.ts), where the
+      # workspace is the only host directory.
+      cp -R ${agentConfig} "$session_dir/packaged"
+      chmod -R u+w "$session_dir/packaged"
+      # subagent.ts starts more pi processes, which would have host tools.
+      rm -f "$session_dir/packaged/extensions/subagent.ts"
 
       add_sandbox_guidelines() {
-        local system_prompt="$agent_dir/packaged/SYSTEM.md"
+        local system_prompt="$session_dir/packaged/SYSTEM.md"
         [[ -f "$system_prompt" ]] || return 0
         ${gawk}/bin/awk -v guidelines="$(cat ${sandboxGuidelines})" \
           '/<\/guidelines>/ { print guidelines } { print }' "$system_prompt" > "$system_prompt.new"
         mv -f "$system_prompt.new" "$system_prompt"
       }
       add_sandbox_guidelines
+      add_agent_config "$session_dir/packaged"
 
       if $no_cwd; then
-        install -m 0444 ${./no-cwd.ts} "$agent_dir/no-cwd.ts"
-        pi_args=(-e /root/.pi/agent/no-cwd.ts "''${pi_args[@]}")
-      fi
-
-      if [[ -n "$caido_url" ]]; then
-        fetch_caido_certificate "$agent_dir/caido-ca.crt"
-        install -m 0444 ${./caido-openrouter.ts} "$agent_dir/caido-openrouter.ts"
-        pi_args=(-e /root/.pi/agent/caido-openrouter.ts "''${pi_args[@]}")
-        if [[ -n "$caido_relay_port" ]]; then
-          host_ports+=("$caido_relay_port")
-        fi
-      fi
-
-      global_agents_dir="$session_dir/home-agents"
-      mkdir -p "$global_agents_dir"
-      if [[ -d "$HOME/.agents/skills" ]]; then
-        cp -RL "$HOME/.agents/skills" "$global_agents_dir/skills"
+        pi_args=(-e ${./no-cwd.ts} "''${pi_args[@]}")
       fi
 
       docker_args=(
-        run --rm -i
+        run --detach --init --name "$container"
         --read-only
         --cap-drop=ALL
         --security-opt=no-new-privileges
@@ -701,41 +564,49 @@ let
         --tmpfs "/root/.cache:rw,nosuid,nodev,size=256m"
         --workdir /workspace
         --mount "type=bind,src=$workspace,dst=/workspace"
-        --mount "type=bind,src=$agent_dir,dst=/root/.pi/agent"
-        --mount "type=bind,src=$global_agents_dir,dst=/root/.agents"
-        --mount "type=bind,src=$host_session_dir,dst=/root/.pi/agent/sessions/--workspace--"
       )
-
-      if [[ -t 0 && -t 1 ]]; then
-        docker_args+=(-t)
-      fi
 
       if [[ -e .git ]]; then
         docker_args+=(--mount "type=bind,src=$workspace/.git,dst=/workspace/.git,readonly")
       fi
 
-      if [[ -f "$host_agent/auth.json" ]]; then
-        : > "$agent_dir/auth.json"
-        docker_args+=(--mount "type=bind,src=$host_agent/auth.json,dst=/root/.pi/agent/auth.json")
-      fi
-      if [[ -f "$host_agent/models-store.json" ]]; then
-        : > "$agent_dir/models-store.json"
-        docker_args+=(--mount "type=bind,src=$host_agent/models-store.json,dst=/root/.pi/agent/models-store.json")
-      fi
+      # pi lists skills by their host paths, so the agent reads read-only copies there.
+      mount_skills() {
+        local skills="$1" copy="$session_dir/$2"
+        [[ -d "$skills" ]] || return 0
+        cp -RL "$skills" "$copy"
+        docker_args+=(--mount "type=bind,src=$copy,dst=$skills,readonly")
+      }
+      mount_skills "$host_agent/skills" pi-skills
+      mount_skills "$HOME/.agents/skills" agents-skills
+
+      host_ports=("''${exposed_ports[@]}")
       if [[ -n "$caido_url" ]]; then
+        route_pi_through_caido
+        # Tools in the container go through Caido as well.
         docker_args+=(
+          --mount "type=bind,src=$caido_certificate,dst=/etc/caido-ca.crt,readonly"
+          --env "PI_CAIDO_CA_CERT=/etc/caido-ca.crt"
           --env "HTTP_PROXY=$caido_url"
           --env "HTTPS_PROXY=$caido_url"
           --env "http_proxy=$caido_url"
           --env "https_proxy=$caido_url"
           --env "NO_PROXY="
           --env "no_proxy="
-          --env "PI_CAIDO_CA_CERT=/root/.pi/agent/caido-ca.crt"
+          --env "SSL_CERT_FILE=/run/caido-ca-bundle.crt"
+          --env "NIX_SSL_CERT_FILE=/run/caido-ca-bundle.crt"
+          --env "NODE_EXTRA_CA_CERTS=/run/caido-ca-bundle.crt"
+          --env "CURL_CA_BUNDLE=/run/caido-ca-bundle.crt"
+          --env "GIT_SSL_CAINFO=/run/caido-ca-bundle.crt"
+          --env "REQUESTS_CA_BUNDLE=/run/caido-ca-bundle.crt"
         )
+        if [[ -n "$caido_relay_port" ]]; then
+          host_ports+=("$caido_relay_port")
+        fi
       fi
-      # Relay each port once, whether from models.json, --caido-url or --expose.
-      relay_ports="$(printf '%s\n' "''${host_ports[@]}" "''${exposed_ports[@]}" | sort -un | paste -sd ' ' -)"
-      docker_args+=(--env "PI_SANDBOX_HOST_PORTS=$relay_ports")
+      if (( ''${#host_ports[@]} > 0 )); then
+        docker_args+=(--env "PI_SANDBOX_HOST_PORTS=$(printf '%s\n' "''${host_ports[@]}" | sort -un | paste -sd ' ' -)")
+      fi
       if $docker_socket; then
         docker_args+=(
           --mount "type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock"
@@ -749,7 +620,10 @@ let
           exit 1
         }
         start_host_relay "$SSH_AUTH_SOCK" ssh-agent
-        docker_args+=(--env "PI_SANDBOX_SSH_PORT=$relay_port")
+        docker_args+=(
+          --env "PI_SANDBOX_SSH_PORT=$relay_port"
+          --env SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
+        )
       fi
 
       if $op_socket; then
@@ -777,16 +651,6 @@ let
           --env "PI_SANDBOX_OP_TOKEN=$op_token"
         )
       fi
-
-      search_port="$(allocate_port)"
-      search_token="$(${openssl}/bin/openssl rand -hex 32)"
-      BXS_SERVE_TOKEN="$search_token" ${bxs}/bin/bxs serve --listen "127.0.0.1:$search_port" \
-        >"$session_dir/search-bridge.log" 2>&1 &
-      relay_pids+=("$!")
-      docker_args+=(
-        --env "PI_SANDBOX_SEARCH_PORT=$search_port"
-        --env "PI_SANDBOX_SEARCH_TOKEN=$search_token"
-      )
 
       if ! docker image inspect ${lib.escapeShellArg imageRef} >/dev/null 2>&1; then
         echo ":: building ${imageRef} with Docker's Linux VM" >&2
@@ -855,7 +719,37 @@ let
         )
       fi
 
-      docker "''${docker_args[@]}" ${lib.escapeShellArg imageRef} "''${pi_args[@]}"
+      container_started=true
+      docker "''${docker_args[@]}" ${lib.escapeShellArg imageRef} >/dev/null
+      ready=false
+      for _ in $(seq 50); do
+        if docker exec "$container" test -e /run/pi-sandbox-ready 2>/dev/null; then
+          ready=true
+          break
+        fi
+        sleep 0.1
+      done
+      if ! $ready; then
+        docker logs "$container" >&2 || true
+        echo "pi: the sandbox container did not start" >&2
+        exit 1
+      fi
+
+      # Built-in tools are off, so the agent has only the container's: if
+      # sandbox-tools.ts fails to load, it has none. Workspace project files
+      # and AGENTS.md are not read on the host.
+      case "''${pi_args[0]:-}" in
+        install | uninstall | remove | update | list | config | mcp) ;;
+        *)
+          pi_args=(
+            --no-builtin-tools --no-approve --no-context-files
+            --session-dir "$host_session_dir"
+            -e ${./sandbox-tools.ts}
+            "''${pi_args[@]}"
+          )
+          ;;
+      esac
+      PI_SANDBOX_CONTAINER="$container" ${pi-coding-agent}/bin/pi "''${pi_args[@]}"
     '';
   };
 in

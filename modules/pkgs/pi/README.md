@@ -5,25 +5,26 @@ macos pi wrapper to handle sandboxing and stuff
 ## usage
 
 - `pi`: plain pi
-- `pi --sandbox`: pi in container
-- `pi --sandbox --tools re`: pi in container with tools installed
+- `pi --sandbox`: pi's tools in container
+- `pi --sandbox --tools re`: pi's tools in container with tools installed
 
 ## sandbox
 
 - needs docker
 - image built on first use
-- cwd mounted at `/workspace`, `.git` read-only
-- pi config, auth, sessions mapped in
+- pi runs on the host with its config, `auth.json` and sessions; none of them enter the container
+- the agent's tools run in the container: bash, read, write, edit, grep, find, ls, and `!` commands
+- cwd mounted at `/workspace`, `.git` read-only; refuses a cwd that contains `~/.pi/agent`
 - read-only root, no caps, no-new-privileges
-- `web_search` goes through `bxs serve` on the host; `bx`, `bxs` and the api key stay on the host
-- host loopback services keep their addresses: ports of loopback `models.json` providers (e.g. `rec serve`), a loopback `--caido-url` and `--expose` urls are relayed to the host
-- those providers' `!command` api keys and headers run on the host at startup, so the resolved key is visible in the container
+- the agent can't reach host files: pi's own tools are off (so no tools at all if the sandbox ones fail to load), project `.pi/` files are ignored, and the workspace `AGENTS.md`/`CLAUDE.md` is read through the container
+- skills are mounted read-only at their host paths; other extensions (e.g. `web_fetch`, `web_search`) run on the host
+- `--expose` urls and a loopback `--caido-url` are relayed to the host
 
 container is deleted whenever you close pi
 
 ## flags
 
-- `--sandbox`: run in container
+- `--sandbox`: run the agent's tools in a container
 - `--tools NAME`: add toolset, repeatable
 - `--docker-socket`: expose host docker socket
 - `--ssh-agent`: relay host ssh agent
