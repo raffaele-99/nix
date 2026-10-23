@@ -15,7 +15,7 @@ in
     };
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.callPackage ../../pkgs/luca { };
+      default = pkgs.callPackage ../pkgs/luca { };
       description = "The shared luca command.";
     };
     settings = lib.mkOption {

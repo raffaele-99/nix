@@ -14,7 +14,7 @@
 
   config = {
     environment.systemPackages = [
-      (pkgs.callPackage ../pkgs/tart { })
+      (pkgs.callPackage ../modules/pkgs/tart { })
       sonic-the-hedgehog
     ];
 

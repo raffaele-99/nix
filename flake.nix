@@ -39,7 +39,7 @@
     let
       caidoReleaseInfo = builtins.fromJSON (builtins.readFile caidoRelease);
       caidoOverlay = final: _prev: {
-        caido-desktop = final.callPackage ./pkgs/caido/package.nix { releaseInfo = caidoReleaseInfo; };
+        caido-desktop = final.callPackage ./modules/pkgs/caido/package.nix { releaseInfo = caidoReleaseInfo; };
       };
       darwinPkgs = import nixpkgs {
         system = "aarch64-darwin";
@@ -85,11 +85,11 @@
       # Bootstrap with the same nix-darwin revision as the configuration.
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
-      packages.aarch64-darwin.scanhaus = darwinPkgs.callPackage ./pkgs/scanhaus { };
-      packages.aarch64-darwin.tart = darwinPkgs.callPackage ./pkgs/tart { };
-      packages.aarch64-darwin.bx = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bx { };
-      packages.aarch64-darwin.bxs = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/bxs { };
-      packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./pkgs/luca { };
+      packages.aarch64-darwin.scanhaus = darwinPkgs.callPackage ./modules/pkgs/scanhaus { };
+      packages.aarch64-darwin.tart = darwinPkgs.callPackage ./modules/pkgs/tart { };
+      packages.aarch64-darwin.bx = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/bx { };
+      packages.aarch64-darwin.bxs = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/bxs { };
+      packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/luca { };
       packages.aarch64-darwin.pi = darwinPkgs.callPackage ./modules/pkgs/pi { nixpkgsRev = nixpkgs.rev; };
       packages.aarch64-darwin.pi2 = pi2.packages.aarch64-darwin.default;
       apps.aarch64-darwin.pi2 = {
