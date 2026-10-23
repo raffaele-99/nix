@@ -16,7 +16,7 @@
   _1password-cli,
   pi-coding-agent,
   nixpkgsRev,
-  bxs ? callPackage ../../../pkgs/bxs { },
+  bxs ? callPackage ../bxs { },
   sandboxToolsets ? import ./toolsets,
 }:
 assert lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (

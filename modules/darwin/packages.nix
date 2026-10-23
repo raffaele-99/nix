@@ -26,8 +26,8 @@
       opentofu
       awscli2
       vultr-cli
-      (callPackage ../../pkgs/bx { })
-      (callPackage ../../pkgs/bxs { })
+      (callPackage ../pkgs/bx { })
+      (callPackage ../pkgs/bxs { })
       (callPackage ../pkgs/pi { nixpkgsRev = config.system.nixpkgsRevision; })
 
       # xcvbjkepe
