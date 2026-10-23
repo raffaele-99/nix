@@ -90,6 +90,13 @@ let
         exit 1
       }
 
+      # Host services on the host's loopback that pi is configured for (Caido,
+      # local model servers) keep their addresses here: each port is relayed.
+      read -r -a host_ports <<< "''${PI_SANDBOX_HOST_PORTS:-}"
+      for port in "''${host_ports[@]}"; do
+        ${pkgs.socat}/bin/socat "TCP-LISTEN:$port,bind=127.0.0.1,fork,reuseaddr" "TCP:host.docker.internal:$port" &
+      done
+
       if [[ -n "''${PI_SANDBOX_SSH_PORT:-}" ]]; then
         export SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock
         start_socket_relay "$PI_SANDBOX_SSH_PORT" "$SSH_AUTH_SOCK"
