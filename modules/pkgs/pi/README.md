@@ -16,6 +16,8 @@ macos pi wrapper to handle sandboxing and stuff
 - pi config, auth, sessions mapped in
 - read-only root, no caps, no-new-privileges
 - `web_search` goes through `bxs serve` on the host; `bx`, `bxs` and the api key stay on the host
+- host loopback services keep their addresses: ports of loopback `models.json` providers (e.g. `rec serve`), a loopback `--caido-url` and `--expose` urls are relayed to the host
+- those providers' `!command` api keys and headers run on the host at startup, so the resolved key is visible in the container
 
 container is deleted whenever you close pi
 
@@ -26,10 +28,17 @@ container is deleted whenever you close pi
 - `--docker-socket`: expose host docker socket
 - `--ssh-agent`: relay host ssh agent
 - `--op-socket`: restricted 1password cli bridge
-- `--caido-url URL`: proxy via caido + trust its ca
+- `--caido-url URL`: proxy pi via caido + trust its ca
+- `--expose URL`: make a host loopback service reachable at the same url, repeatable
 - `--no-cwd`: strip cwd from system prompt
 
 all flags need `--sandbox` except `--caido-url` and `--no-cwd`
+
+## pentesting with caido
+
+- `pi --sandbox --expose http://127.0.0.1:8080`
+- then e.g. "enum this host, proxy everything through caido at http://127.0.0.1:8080"
+- nothing is proxied unless you ask; through caido, `127.0.0.1` targets are the host's
 
 everything else passes through to pi
 

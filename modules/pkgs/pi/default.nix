@@ -223,16 +223,130 @@ let
     except ValueError:
         pass
 
-    container_netloc = parsed.netloc
-    if is_loopback:
-        userinfo, separator, _host_port = parsed.netloc.rpartition("@")
-        container_netloc = (userinfo + separator if separator else "") + "host.docker.internal"
-        if port is not None:
-            container_netloc += f":{port}"
-
-    container_url = urlunsplit(("http", container_netloc, "", "", ""))
+    # The sandbox relays a loopback Caido's port, so the URL works unchanged there.
+    relay_port = str(port or 80) if is_loopback else ""
     cache_key = hashlib.sha256(host_url.encode()).hexdigest()[:16]
-    print("\t".join((host_url, container_url, cache_key)))
+    print("\t".join((host_url, cache_key, relay_port)))
+  '';
+
+  # models.json is written for the host. A provider served from the host's
+  # loopback, such as `rec serve`, is a host service: the sandbox relays its
+  # port (printed here) to the host, so its URL works unchanged, and its
+  # `!command` API key and headers run here, where the server and its
+  # credentials live. Other providers keep their commands, which run in the
+  # container as before.
+  sandboxModels = writeText "pi-sandbox-models.py" ''
+    import ipaddress
+    import json
+    import os
+    import re
+    import subprocess
+    import sys
+    import tempfile
+    from urllib.parse import urlsplit
+
+    path = sys.argv[1]
+
+
+    def warn(message):
+        print(f"pi: {message}", file=sys.stderr)
+
+
+    # Accept what pi accepts: `//` comments and trailing commas (stripJsonComments).
+    def strip_json_comments(text):
+        text = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*', lambda m: m[0] if m[0][0] == '"' else "", text)
+        return re.sub(r'"(?:\\.|[^"\\])*"|,(\s*[}\]])', lambda m: m[0] if m[1] is None else m[1], text)
+
+
+    def loopback_port(url):
+        if not isinstance(url, str):
+            return None
+        try:
+            parsed = urlsplit(url)
+            hostname, port = parsed.hostname, parsed.port
+        except ValueError:
+            return None
+        if not hostname:
+            return None
+        is_loopback = hostname == "localhost"
+        try:
+            is_loopback = is_loopback or ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            pass
+        if not is_loopback:
+            return None
+        return port or (443 if parsed.scheme.lower() == "https" else 80)
+
+
+    # pi reads `$NAME` as an environment variable and a leading `!` as a command.
+    def literal(value):
+        value = value.replace("$", "$$")
+        return "$" + value if value.startswith("!") else value
+
+
+    # Resolves a `!command` value the way pi does: sh, stdout trimmed, 10s timeout.
+    def resolve_on_host(value, description):
+        if not isinstance(value, str) or not value.startswith("!"):
+            return value
+        try:
+            completed = subprocess.run(
+                value[1:],
+                shell=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+            output = completed.stdout.decode("utf-8", "replace").strip() if completed.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            output = ""
+        if not output:
+            warn(f"could not resolve {description} on the host from: {value[1:]}")
+            return value
+        return literal(output)
+
+
+    def objects(value):
+        values = value.values() if isinstance(value, dict) else value if isinstance(value, list) else []
+        return [item for item in values if isinstance(item, dict)]
+
+
+    try:
+        with open(path, encoding="utf-8-sig") as file:
+            config = json.loads(strip_json_comments(file.read()))
+    except (OSError, ValueError) as error:
+        warn(f"cannot adapt models.json for the sandbox, using it unchanged: {error}")
+        raise SystemExit(0)
+
+    providers = config.get("providers") if isinstance(config, dict) else None
+    original = json.dumps(config)
+    ports = set()
+    for provider_id, provider in (providers.items() if isinstance(providers, dict) else []):
+        if not isinstance(provider, dict):
+            continue
+        scopes = [provider, *objects(provider.get("models"))]
+        provider_ports = {port for port in (loopback_port(scope.get("baseUrl")) for scope in scopes) if port}
+        if not provider_ports:
+            continue
+        ports |= provider_ports
+        label = f'provider "{provider_id}"'
+        if "apiKey" in provider:
+            provider["apiKey"] = resolve_on_host(provider["apiKey"], f"API key for {label}")
+        for scope in [*scopes, *objects(provider.get("modelOverrides"))]:
+            headers = scope.get("headers")
+            if isinstance(headers, dict):
+                for name, value in headers.items():
+                    headers[name] = resolve_on_host(value, f'{label} header "{name}"')
+
+    if json.dumps(config) != original:
+        # Replace the copy: it may be read-only, and now holds resolved secrets.
+        descriptor, temporary = tempfile.mkstemp(prefix=".models.json.", dir=os.path.dirname(path))
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(config, file, indent=2)
+            file.write("\n")
+        os.replace(temporary, path)
+    print(*sorted(ports))
   '';
 
   wrapper = writeShellApplication {
@@ -255,10 +369,22 @@ let
       no_extensions=false
       passthrough=false
       caido_url=""
-      caido_container_url=""
       caido_cache_key=""
+      caido_relay_port=""
+      exposed_ports=()
       toolsets=()
       pi_args=()
+
+      # --expose URL: a service on the host's loopback, such as Caido, is
+      # reachable at the same URL in the sandbox. Nothing is routed through it.
+      expose() {
+        local pattern='^https?://(127\.0\.0\.1|localhost):([1-9][0-9]{0,4})/?$'
+        if [[ ! "$1" =~ $pattern ]]; then
+          echo "pi: --expose takes a loopback URL with a port, such as http://127.0.0.1:8080 (other hosts are reachable already)" >&2
+          exit 2
+        fi
+        exposed_ports+=("''${BASH_REMATCH[2]}")
+      }
 
       while (( $# > 0 )); do
         if $passthrough; then
@@ -320,6 +446,14 @@ let
             fi
             shift
             ;;
+          --expose)
+            expose "''${2:-}"
+            shift 2
+            ;;
+          --expose=*)
+            expose "''${1#*=}"
+            shift
+            ;;
           --)
             passthrough=true
             pi_args+=("$1")
@@ -346,7 +480,7 @@ let
 
       if [[ -n "$caido_url" ]]; then
         caido_details="$(${python3}/bin/python3 ${caidoUrlResolver} "$caido_url")"
-        IFS=$'\t' read -r caido_url caido_container_url caido_cache_key <<< "$caido_details"
+        IFS=$'\t' read -r caido_url caido_cache_key caido_relay_port <<< "$caido_details"
       fi
 
       fetch_caido_certificate() {
@@ -406,8 +540,8 @@ let
 
       if ! $sandbox; then
         add_agent_config ${agentConfig}
-        if $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} > 0 )); then
-          echo "pi: --docker-socket, --ssh-agent, --op-socket and --tools require --sandbox" >&2
+        if $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} + ''${#exposed_ports[@]} > 0 )); then
+          echo "pi: --docker-socket, --ssh-agent, --op-socket, --tools and --expose require --sandbox" >&2
           exit 2
         fi
         if [[ -n "$caido_url" ]]; then
@@ -515,6 +649,15 @@ let
         copy_agent_item "$name"
       done
 
+      host_ports=()
+      if [[ -f "$agent_dir/models.json" ]]; then
+        if model_ports="$(${python3}/bin/python3 ${sandboxModels} "$agent_dir/models.json")"; then
+          read -r -a host_ports <<< "$model_ports"
+        else
+          echo "pi: could not adapt models.json for the sandbox; using it unchanged" >&2
+        fi
+      fi
+
       cp -R ${agentConfig} "$agent_dir/packaged"
       chmod -R u+w "$agent_dir/packaged"
       add_agent_config /root/.pi/agent/packaged
@@ -537,6 +680,9 @@ let
         fetch_caido_certificate "$agent_dir/caido-ca.crt"
         install -m 0444 ${./caido-openrouter.ts} "$agent_dir/caido-openrouter.ts"
         pi_args=(-e /root/.pi/agent/caido-openrouter.ts "''${pi_args[@]}")
+        if [[ -n "$caido_relay_port" ]]; then
+          host_ports+=("$caido_relay_port")
+        fi
       fi
 
       global_agents_dir="$session_dir/home-agents"
@@ -578,15 +724,18 @@ let
       fi
       if [[ -n "$caido_url" ]]; then
         docker_args+=(
-          --env "HTTP_PROXY=$caido_container_url"
-          --env "HTTPS_PROXY=$caido_container_url"
-          --env "http_proxy=$caido_container_url"
-          --env "https_proxy=$caido_container_url"
+          --env "HTTP_PROXY=$caido_url"
+          --env "HTTPS_PROXY=$caido_url"
+          --env "http_proxy=$caido_url"
+          --env "https_proxy=$caido_url"
           --env "NO_PROXY="
           --env "no_proxy="
           --env "PI_CAIDO_CA_CERT=/root/.pi/agent/caido-ca.crt"
         )
       fi
+      # Relay each port once, whether from models.json, --caido-url or --expose.
+      relay_ports="$(printf '%s\n' "''${host_ports[@]}" "''${exposed_ports[@]}" | sort -un | paste -sd ' ' -)"
+      docker_args+=(--env "PI_SANDBOX_HOST_PORTS=$relay_ports")
       if $docker_socket; then
         docker_args+=(
           --mount "type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock"
