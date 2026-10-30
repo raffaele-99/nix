@@ -281,10 +281,31 @@ let
             sandbox=false
             shift
             ;;
-          -h | --help | -v | --version | --list-models | --export)
+          -h | --help | -v | --version | --list-models)
             info=true
             pi_args+=("$1")
             shift
+            ;;
+          --export)
+            if (( $# < 2 )) || [[ -z "$2" ]]; then
+              echo "pi: --export requires a session file" >&2
+              exit 2
+            fi
+            info=true
+            pi_args+=("$1" "$2")
+            shift 2
+            ;;
+          --provider | --model | --api-key | --system-prompt | --append-system-prompt | \
+          --name | -n | --session | --session-id | --fork | --session-dir | --models | \
+          --thinking | --extension | -e | --skill | --prompt-template | --theme | \
+          -t | --exclude-tools | -xt | --mode | --use-theme | --tui-mode)
+            # Pi consumes the next token as a value, not a wrapper or info flag.
+            pi_args+=("$1")
+            shift
+            if (( $# > 0 )); then
+              pi_args+=("$1")
+              shift
+            fi
             ;;
           --tools)
             if (( $# < 2 )) || [[ -z "$2" || "$2" == --* ]]; then
