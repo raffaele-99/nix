@@ -10,6 +10,7 @@ macos pi wrapper to handle sandboxing and stuff
 
 ## sandbox
 
+- `-h`, `-v`, `--list-models`, `--export` and subcommands (`pi update`, `pi mcp`, ...) skip the container
 - needs docker
 - image built on first use
 - pi runs on the host with its config, `auth.json` and sessions; none of them enter the container
