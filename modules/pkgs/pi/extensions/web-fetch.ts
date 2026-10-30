@@ -69,10 +69,43 @@ const onHost = {
   read: (file: string) => readFile(file, "utf8"),
 };
 
+async function curlInContainer(name: string, args: string[], signal?: AbortSignal) {
+  if (signal?.aborted) throw new Error("aborted");
+  const id = randomBytes(16).toString("hex");
+  const cancelled = `/tmp/pi-web-fetch-${id}.cancelled`;
+  const request = execFileAsync("docker", [
+    "exec", "-e", `PI_WEB_FETCH_RUN=${id}`, name, "sh", "-c",
+    'test ! -e "$1" || exit 125; shift; exec curl --create-dirs "$@"',
+    "sh", cancelled, ...args,
+  ]);
+
+  // Killing the docker client does not stop curl. Mark cancellation before
+  // scanning so an exec that has not started yet will also refuse to run.
+  let cancellation: Promise<unknown> | undefined;
+  const onAbort = () => {
+    cancellation ??= execFileAsync("docker", [
+      "exec", name, "sh", "-c",
+      ': > "$2"; for f in /proc/[0-9]*/environ; do ' +
+        'if grep -qxzF "PI_WEB_FETCH_RUN=$1" "$f" 2>/dev/null; then ' +
+        'p=${f%/environ}; kill -KILL "${p#/proc/}" 2>/dev/null || true; fi; done',
+      "sh", id, cancelled,
+    ], { timeout: 5000 }).catch(() => { request.child.kill(); });
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) onAbort();
+  try {
+    const result = await request;
+    if (signal?.aborted) throw new Error("aborted");
+    return result;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    await cancellation;
+  }
+}
+
 const inContainer = (name: string) => ({
   rawPath: async () => `/tmp/pi-web-fetch-${randomBytes(4).toString("hex")}/raw`,
-  curl: (args: string[], signal?: AbortSignal) =>
-    execFileAsync("docker", ["exec", name, "curl", "--create-dirs", ...args], { signal }),
+  curl: (args: string[], signal?: AbortSignal) => curlInContainer(name, args, signal),
   read: async (file: string) =>
     (await execFileAsync("docker", ["exec", name, "cat", "--", file], { maxBuffer: 2 * maxFileSize })).stdout,
 });
