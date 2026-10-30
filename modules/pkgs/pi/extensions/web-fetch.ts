@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,6 +60,25 @@ function isBlocked(url: string): boolean {
   }
 }
 
+const maxFileSize = 25 * 1024 * 1024;
+const container = process.env.PI_SANDBOX_CONTAINER;
+
+const onHost = {
+  rawPath: async () => join(await mkdtemp(join(tmpdir(), "pi-web-fetch-")), "raw"),
+  curl: (args: string[], signal?: AbortSignal) => execFileAsync("curl", args, { signal }),
+  read: (file: string) => readFile(file, "utf8"),
+};
+
+const inContainer = (name: string) => ({
+  rawPath: async () => `/tmp/pi-web-fetch-${randomBytes(4).toString("hex")}/raw`,
+  curl: (args: string[], signal?: AbortSignal) =>
+    execFileAsync("docker", ["exec", name, "curl", "--create-dirs", ...args], { signal }),
+  read: async (file: string) =>
+    (await execFileAsync("docker", ["exec", name, "cat", "--", file], { maxBuffer: 2 * maxFileSize })).stdout,
+});
+
+const fetcher = container ? inContainer(container) : onHost;
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_fetch",
@@ -70,25 +90,24 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, { url }, signal) {
       if (isBlocked(url)) throw new Error("do not try to make requests to this domain");
       const target = url.replace(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\//, "https://raw.githubusercontent.com/$1/");
-      const raw = join(await mkdtemp(join(tmpdir(), "pi-web-fetch-")), "raw");
+      const raw = await fetcher.rawPath();
       try {
-        const { stdout: type } = await execFileAsync(
-          "curl",
+        const { stdout: type } = await fetcher.curl(
           [
             "-sSL",
             "--fail-with-body",
             "--globoff",
             "--max-time", "30",
-            "--max-filesize", String(25 * 1024 * 1024),
+            "--max-filesize", String(maxFileSize),
             "--proto", "=http,https",
             "--proto-redir", "=http,https",
             "-o", raw,
             "-w", "%{content_type}",
             "--", target,
           ],
-          { signal },
+          signal,
         );
-        const body = await readFile(raw, "utf8");
+        const body = await fetcher.read(raw);
         const html = /html/i.test(type);
         const { content, truncated } = truncateHead(html ? htmlToMarkdown(body) : body, {
           maxLines: DEFAULT_MAX_LINES,
@@ -99,7 +118,7 @@ export default function (pi: ExtensionAPI) {
         return { content: [{ type: "text", text: content + note }], details: { rawBytes: Buffer.byteLength(body), rawChars: body.length } };
       } catch (err: any) {
         if (signal?.aborted) throw new Error("aborted");
-        const body = /html/i.test(err?.stdout ?? "") ? "" : await readFile(raw, "utf8").catch(() => "");
+        const body = /html/i.test(err?.stdout ?? "") ? "" : await fetcher.read(raw).catch(() => "");
         const reason = [err?.stderr?.trim() || err?.message, body.trim().slice(0, 1000)].filter(Boolean).join("\n");
         return { content: [{ type: "text", text: `web_fetch failed: ${reason}` }], details: {} };
       }
