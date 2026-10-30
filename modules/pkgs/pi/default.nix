@@ -240,7 +240,7 @@ let
       socat
     ];
     text = ''
-      sandbox=false
+      sandbox=true
       info=false
       docker_socket=false
       ssh_agent=false
@@ -275,6 +275,10 @@ let
         case "$1" in
           --sandbox)
             sandbox=true
+            shift
+            ;;
+          --no-sandbox)
+            sandbox=false
             shift
             ;;
           -h | --help | -v | --version | --list-models | --export)
@@ -454,7 +458,7 @@ let
       if $info || ! $sandbox; then
         add_agent_config ${agentConfig}
         if ! $info && { $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} + ''${#exposed_ports[@]} > 0 )); }; then
-          echo "pi: --docker-socket, --ssh-agent, --op-socket, --tools and --expose require --sandbox" >&2
+          echo "pi: --docker-socket, --ssh-agent, --op-socket, --tools and --expose don't work with --no-sandbox" >&2
           exit 2
         fi
         if [[ -n "$caido_url" ]]; then
@@ -765,7 +769,7 @@ symlinkJoin {
     ln -s ${wrapper}/bin/pi "$out/bin/pi"
   '';
   meta = pi-coding-agent.meta // {
-    description = "Pi coding agent with an opt-in Docker sandbox";
+    description = "Pi coding agent whose tools run in a Docker sandbox unless --no-sandbox is given";
     mainProgram = "pi";
     platforms = lib.platforms.darwin;
   };

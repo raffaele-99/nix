@@ -4,12 +4,13 @@ macos pi wrapper to handle sandboxing and stuff
 
 ## usage
 
-- `pi`: plain pi
-- `pi --sandbox`: pi's tools in container
-- `pi --sandbox --tools re`: pi's tools in container with tools installed
+- `pi`: pi's tools in container
+- `pi --tools re`: pi's tools in container with tools installed
+- `pi --no-sandbox`: plain pi, tools on the host
 
 ## sandbox
 
+- on by default; `--no-sandbox` runs the tools on the host
 - `-h`, `-v`, `--list-models`, `--export` and subcommands (`pi update`, `pi mcp`, ...) skip the container
 - needs docker
 - image built on first use
@@ -27,7 +28,7 @@ container is deleted whenever you close pi
 
 ## flags
 
-- `--sandbox`: run the agent's tools in a container
+- `--no-sandbox`: run the agent's tools on the host
 - `--tools NAME`: add toolset, repeatable
 - `--docker-socket`: expose host docker socket
 - `--ssh-agent`: relay host ssh agent
@@ -36,11 +37,11 @@ container is deleted whenever you close pi
 - `--expose URL`: make a host loopback service reachable at the same url, repeatable
 - `--no-cwd`: strip cwd from system prompt
 
-all flags need `--sandbox` except `--caido-url` and `--no-cwd`
+all flags except `--caido-url` and `--no-cwd` need the sandbox
 
 ## pentesting with caido
 
-- `pi --sandbox --expose http://127.0.0.1:8080`
+- `pi --expose http://127.0.0.1:8080`
 - then e.g. "enum this host, proxy everything through caido at http://127.0.0.1:8080"
 - nothing is proxied unless you ask; through caido, `127.0.0.1` targets are the host's
 
