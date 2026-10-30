@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
-import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -17,10 +16,6 @@ import { getCapabilities, hyperlink, Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 
 const execFileAsync = promisify(execFile);
-
-const sandboxBridge = process.env.PI_SANDBOX_SEARCH_PORT
-  ? { port: Number(process.env.PI_SANDBOX_SEARCH_PORT), token: process.env.PI_SANDBOX_SEARCH_TOKEN ?? "" }
-  : undefined;
 
 const SearchParams = Type.Object({
   query: Type.String({ description: "The search query" }),
@@ -63,47 +58,12 @@ function bxsArgs(params: SearchInput): string[] {
 }
 
 async function search(params: SearchInput, signal?: AbortSignal): Promise<string> {
-  if (sandboxBridge) return searchOnHost(sandboxBridge, params, signal);
   const { stdout } = await execFileAsync("bxs", bxsArgs(params), {
     signal,
     encoding: "utf-8",
     maxBuffer: 100 * 1024 * 1024,
   });
   return stdout;
-}
-
-function searchOnHost(
-  bridge: { port: number; token: string },
-  params: SearchInput,
-  signal?: AbortSignal,
-): Promise<string> {
-  const body = JSON.stringify(params);
-  return new Promise((resolve, reject) => {
-    const req = request(
-      {
-        host: "host.docker.internal",
-        port: bridge.port,
-        method: "POST",
-        signal,
-        headers: {
-          Authorization: `Bearer ${bridge.token}`,
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body),
-        },
-      },
-      (res) => {
-        let data = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          if (res.statusCode === 200) return resolve(data);
-          reject(Object.assign(new Error(`search bridge returned HTTP ${res.statusCode}`), { stderr: data }));
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end(body);
-  });
 }
 
 function plain(text: string): string {
