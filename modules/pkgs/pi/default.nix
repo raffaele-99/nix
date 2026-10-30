@@ -471,11 +471,11 @@ let
       fi
 
       command -v docker >/dev/null || {
-        echo "pi: Docker is required for --sandbox" >&2
+        echo "pi: Docker is required for the sandbox; use --no-sandbox to run tools on the host" >&2
         exit 1
       }
       docker info >/dev/null 2>&1 || {
-        echo "pi: Docker is unavailable; ensure Colima is running" >&2
+        echo "pi: Docker is unavailable; start Colima, or use --no-sandbox to run tools on the host" >&2
         exit 1
       }
 
@@ -483,7 +483,7 @@ let
       host_agent="$HOME/.pi/agent"
       # The workspace is the only host directory the agent can reach.
       if [[ "$workspace" == / || "$host_agent/" == "$workspace"/* ]]; then
-        echo "pi: refusing to mount $workspace in the sandbox: it contains $host_agent" >&2
+        echo "pi: refusing to mount $workspace in the sandbox: it contains $host_agent; use --no-sandbox to run tools on the host" >&2
         exit 2
       fi
 
@@ -732,7 +732,10 @@ let
       fi
 
       container_started=true
-      docker "''${docker_args[@]}" ${lib.escapeShellArg imageRef} >/dev/null
+      if ! docker "''${docker_args[@]}" ${lib.escapeShellArg imageRef} >/dev/null; then
+        echo "pi: could not start the sandbox container for $workspace; use --no-sandbox to run tools on the host" >&2
+        exit 1
+      fi
       ready=false
       for _ in $(seq 50); do
         if docker exec "$container" test -e /run/pi-sandbox-ready 2>/dev/null; then
