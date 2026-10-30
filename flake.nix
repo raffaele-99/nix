@@ -105,7 +105,7 @@
       apps.aarch64-darwin.pi = {
         type = "app";
         program = "${self.packages.aarch64-darwin.pi}/bin/pi";
-        meta.description = "Run Pi natively or in an opt-in Docker sandbox";
+        meta.description = "Run Pi with its tools in a Docker sandbox, or natively with --no-sandbox";
       };
       apps.aarch64-darwin.scanhaus = {
         type = "app";
