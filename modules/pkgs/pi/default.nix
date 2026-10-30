@@ -241,6 +241,7 @@ let
     ];
     text = ''
       sandbox=false
+      info=false
       docker_socket=false
       ssh_agent=false
       op_socket=false
@@ -274,6 +275,11 @@ let
         case "$1" in
           --sandbox)
             sandbox=true
+            shift
+            ;;
+          -h | --help | -v | --version | --list-models | --export)
+            info=true
+            pi_args+=("$1")
             shift
             ;;
           --tools)
@@ -445,9 +451,9 @@ let
         pi_args=(-e ${./caido-openrouter.ts} "''${pi_args[@]}")
       }
 
-      if ! $sandbox; then
+      if $info || ! $sandbox; then
         add_agent_config ${agentConfig}
-        if $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} + ''${#exposed_ports[@]} > 0 )); then
+        if ! $info && { $docker_socket || $ssh_agent || $op_socket || (( ''${#toolsets[@]} + ''${#exposed_ports[@]} > 0 )); }; then
           echo "pi: --docker-socket, --ssh-agent, --op-socket, --tools and --expose require --sandbox" >&2
           exit 2
         fi
