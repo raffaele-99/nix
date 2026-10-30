@@ -17,7 +17,8 @@ macos pi wrapper to handle sandboxing and stuff
 - cwd mounted at `/workspace`, `.git` read-only; refuses a cwd that contains `~/.pi/agent`
 - read-only root, no caps, no-new-privileges
 - the agent can't reach host files: pi's own tools are off (so no tools at all if the sandbox ones fail to load), project `.pi/` files are ignored, and the workspace `AGENTS.md`/`CLAUDE.md` is read through the container
-- skills are mounted read-only at their host paths; other extensions (e.g. `web_fetch`, `web_search`) run on the host
+- skills are mounted read-only at their host paths; other extensions (e.g. `web_search`) run on the host
+- `web_fetch` curls from the container and leaves the raw response in its `/tmp`
 - `--expose` urls and a loopback `--caido-url` are relayed to the host
 
 container is deleted whenever you close pi
