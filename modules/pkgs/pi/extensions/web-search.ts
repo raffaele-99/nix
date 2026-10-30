@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,8 @@ import { getCapabilities, hyperlink, Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 
 const execFileAsync = promisify(execFile);
+
+const container = process.env.PI_SANDBOX_CONTAINER;
 
 const SearchParams = Type.Object({
   query: Type.String({ description: "The search query" }),
@@ -64,6 +67,19 @@ async function search(params: SearchInput, signal?: AbortSignal): Promise<string
     maxBuffer: 100 * 1024 * 1024,
   });
   return stdout;
+}
+
+async function saveFullOutput(output: string): Promise<string> {
+  if (container) {
+    const file = `/tmp/pi-web-search-${randomBytes(4).toString("hex")}/output.json`;
+    const write = execFileAsync("docker", ["exec", "-i", container, "sh", "-c", 'mkdir -p "${1%/*}" && cat > "$1"', "sh", file]);
+    write.child.stdin?.on("error", () => {}).end(output);
+    await write;
+    return file;
+  }
+  const file = join(await mkdtemp(join(tmpdir(), "pi-web-search-")), "output.json");
+  await withFileMutationQueue(file, () => writeFile(file, output, "utf8"));
+  return file;
 }
 
 function plain(text: string): string {
@@ -139,11 +155,7 @@ export default function (pi: ExtensionAPI) {
       let resultText = truncation.content;
 
       if (truncation.truncated) {
-        const tempDir = await mkdtemp(join(tmpdir(), "pi-web-search-"));
-        const tempFile = join(tempDir, "output.json");
-        await withFileMutationQueue(tempFile, async () => {
-          await writeFile(tempFile, output, "utf8");
-        });
+        const tempFile = await saveFullOutput(output);
 
         details.truncation = truncation;
         details.fullOutputPath = tempFile;
