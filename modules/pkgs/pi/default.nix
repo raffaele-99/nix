@@ -299,7 +299,6 @@ let
           --name | -n | --session | --session-id | --fork | --session-dir | --models | \
           --thinking | --extension | -e | --skill | --prompt-template | --theme | \
           -t | --exclude-tools | -xt | --mode | --use-theme | --tui-mode)
-            # Pi consumes the next token as a value, not a wrapper or info flag.
             pi_args+=("$1")
             shift
             if (( $# > 0 )); then

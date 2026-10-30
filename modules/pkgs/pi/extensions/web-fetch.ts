@@ -79,8 +79,6 @@ async function curlInContainer(name: string, args: string[], signal?: AbortSigna
     "sh", cancelled, ...args,
   ]);
 
-  // Killing the docker client does not stop curl. Mark cancellation before
-  // scanning so an exec that has not started yet will also refuse to run.
   let cancellation: Promise<unknown> | undefined;
   const onAbort = () => {
     cancellation ??= execFileAsync("docker", [
