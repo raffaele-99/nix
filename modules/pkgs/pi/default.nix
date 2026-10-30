@@ -345,6 +345,12 @@ let
         esac
       done
 
+      case "''${pi_args[0]:-}" in
+        install | uninstall | remove | update | list | config | auth | mcp)
+          exec ${pi-coding-agent}/bin/pi "''${pi_args[@]}"
+          ;;
+      esac
+
       for toolset in "''${toolsets[@]}"; do
         case "$toolset" in
           ${lib.concatMapStringsSep "\n" (name: ''
@@ -400,12 +406,8 @@ let
       }
 
       # Prepends the packaged configuration, located at $1 as pi sees it.
-      # Package subcommands such as `pi install` must stay the first argument.
       add_agent_config() {
         local root="$1" name
-        case "''${pi_args[0]:-}" in
-          install | uninstall | remove | update | list | config | mcp) return ;;
-        esac
         local args=(--system-prompt "$root/SYSTEM.md" --theme "$root/themes")
         if ! $no_extensions; then
           for name in ${lib.escapeShellArgs (lib.attrNames (builtins.readDir ./extensions))}; do
@@ -738,18 +740,11 @@ let
       # Built-in tools are off, so the agent has only the container's: if
       # sandbox-tools.ts fails to load, it has none. Workspace project files
       # and AGENTS.md are not read on the host.
-      case "''${pi_args[0]:-}" in
-        install | uninstall | remove | update | list | config | mcp) ;;
-        *)
-          pi_args=(
-            --no-builtin-tools --no-approve --no-context-files
-            --session-dir "$host_session_dir"
-            -e ${./sandbox-tools.ts}
-            "''${pi_args[@]}"
-          )
-          ;;
-      esac
-      PI_SANDBOX_CONTAINER="$container" ${pi-coding-agent}/bin/pi "''${pi_args[@]}"
+      PI_SANDBOX_CONTAINER="$container" ${pi-coding-agent}/bin/pi \
+        --no-builtin-tools --no-approve --no-context-files \
+        --session-dir "$host_session_dir" \
+        -e ${./sandbox-tools.ts} \
+        "''${pi_args[@]}"
     '';
   };
 in
