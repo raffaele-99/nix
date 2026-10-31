@@ -598,10 +598,6 @@ let
         --mount "type=bind,src=$workspace,dst=/workspace"
       )
 
-      if [[ -e .git ]]; then
-        docker_args+=(--mount "type=bind,src=$workspace/.git,dst=/workspace/.git,readonly")
-      fi
-
       # pi lists skills by their host paths, so the agent reads read-only copies there.
       mount_skills() {
         local skills="$1" copy="$session_dir/$2"
