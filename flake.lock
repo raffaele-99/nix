@@ -3,7 +3,7 @@
     "caidoRelease": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-ENumVNcyExeUqo2RmqBLTbJvtdEvYHoC1iAZBbZtQAY=",
+        "narHash": "sha256-py3P8ILZiXqHZBRRKfNf8BOIcWuW00DHMswj4HStzZU=",
         "type": "file",
         "url": "https://caido.download/releases/latest"
       },
@@ -19,11 +19,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791642191,
-        "narHash": "sha256-0bK0A59rVUn1SRZzo4cNi4VSqAe7vR1gL2/MZl53Frw=",
+        "lastModified": 1793193205,
+        "narHash": "sha256-X6xa6sGA7RnJQuZGbFMC+K+KToWAlBDCCjJXfTwEPsw=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "c58f54c733a7894d84fa2fdff26cc12088c4b78c",
+        "rev": "095fef2f265c3c0da4fe315efba8f8a04495ab34",
         "type": "github"
       },
       "original": {
@@ -39,11 +39,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786845137,
-        "narHash": "sha256-oQFip+v0luP8NIxJzmiW4Wu8bILsbFWom5l0zonl8hQ=",
+        "lastModified": 1793418699,
+        "narHash": "sha256-+RpTlcdh9KqZ+ZiLkNSTvibQWm935EcIdBzRPCTFsrQ=",
         "owner": "LnL7",
         "repo": "nix-darwin",
-        "rev": "4cff07de74b50e64bdd68cd4e722ab5b6b35ee48",
+        "rev": "ff0e21a414d4547183396da1b44a66f2577b65e9",
         "type": "github"
       },
       "original": {
@@ -54,11 +54,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1791734076,
-        "narHash": "sha256-i5qk1kLiit98rRbh1AXmWBNT9QXC/y4l5Wk/u5EdpDQ=",
+        "lastModified": 1793341285,
+        "narHash": "sha256-Y1CiZ4SoBUjLQyQM/pY+rS2dXD3CHLPstF0lmOc73D4=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "7fd4004d0511991fff3a0524856a9be09e28c5f0",
+        "rev": "1c89083e451e891152365b799595cf7790a43325",
         "type": "github"
       },
       "original": {
@@ -75,11 +75,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792225399,
-        "narHash": "sha256-p9O5m2baJDFrWJNwLuXNOxAx1AGeleHlHl8hJd3D3Pg=",
+        "lastModified": 1793540760,
+        "narHash": "sha256-n9LjoqjcXQqh9zEkuaAT0jH8bStyFT/AcyMFmMytlBM=",
         "ref": "refs/heads/main",
-        "rev": "fa2ce087b7233f4e51bd339e134004f84ddc3df5",
-        "revCount": 1,
+        "rev": "e8e5d591d73cf663262b1c7027eb8ea16a0e1b34",
+        "revCount": 9,
         "type": "git",
         "url": "ssh://git@github.com/raffaele-99/pi2.git"
       },
@@ -105,11 +105,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792222704,
-        "narHash": "sha256-9X00y2CIhBwLfbZaWuFrwkOiiXJMafy0GSxoIkcGSjM=",
+        "lastModified": 1792896447,
+        "narHash": "sha256-KrsEKWT4UBd8SHEGcp1omhdkJcIDw2LW0CgFs/Mxtic=",
         "ref": "refs/heads/main",
-        "rev": "b8332fa4627b4842be0226ce6ce83a1111e7ffb4",
-        "revCount": 20,
+        "rev": "5b565129937e76e678db86b79353c659da32ac9f",
+        "revCount": 26,
         "type": "git",
         "url": "https://github.com/take-it-ez-babe/sonic-the-hedgehog"
       },

@@ -368,7 +368,17 @@ func (a application) clean(ctx context.Context) error {
 	if _, err := a.command(ctx, deleteGenerations, false); err != nil {
 		return err
 	}
-	_, err := a.command(ctx, nixCommand(".", "store", "gc"), false)
+	gc := invocation{
+		dir:     ".",
+		program: "/usr/bin/sudo",
+		args: []string{
+			"-H", "--", "nix",
+			"--extra-experimental-features", "nix-command flakes",
+			"--store", "local",
+			"store", "gc",
+		},
+	}
+	_, err := a.command(ctx, gc, false)
 	return err
 }
 
