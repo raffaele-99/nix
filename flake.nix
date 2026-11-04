@@ -23,6 +23,10 @@
       url = "git+https://github.com/take-it-ez-babe/sonic-the-hedgehog";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    workbench = {
+      url = "git+https://github.com/raffaele-99/workbench";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -34,6 +38,7 @@
       caidoRelease,
       pi2,
       sonic-the-hedgehog,
+      workbench,
       ...
     }:
     let
@@ -74,6 +79,7 @@
         };
         modules = [
           self.darwinModules.default
+          workbench.darwinModules.default
           ./hosts/mac-mini.nix
         ];
       };
@@ -86,6 +92,7 @@
       packages.aarch64-darwin.darwin-rebuild = nix-darwin.packages.aarch64-darwin.darwin-rebuild;
       packages.aarch64-darwin.caido-desktop = darwinPkgs.caido-desktop;
       packages.aarch64-darwin.scanhaus = darwinPkgs.callPackage ./modules/pkgs/scanhaus { };
+      packages.aarch64-darwin.workbench = workbench.packages.aarch64-darwin.default;
       packages.aarch64-darwin.tart = darwinPkgs.callPackage ./modules/pkgs/tart { };
       packages.aarch64-darwin.bx = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/bx { };
       packages.aarch64-darwin.bxs = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/bxs { };

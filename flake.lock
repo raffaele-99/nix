@@ -95,7 +95,8 @@
         "nix-darwin": "nix-darwin",
         "nixpkgs": "nixpkgs",
         "pi2": "pi2",
-        "sonic-the-hedgehog": "sonic-the-hedgehog"
+        "sonic-the-hedgehog": "sonic-the-hedgehog",
+        "workbench": "workbench"
       }
     },
     "sonic-the-hedgehog": {
@@ -116,6 +117,26 @@
       "original": {
         "type": "git",
         "url": "https://github.com/take-it-ez-babe/sonic-the-hedgehog"
+      }
+    },
+    "workbench": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793798233,
+        "narHash": "sha256-6nzIA5zHznY1cSnIGadEk7/w+40lPjtrUQwkLm6PMcc=",
+        "ref": "refs/heads/main",
+        "rev": "9dcd46c1a22f2f41887ae50bb9cd2552148b2a25",
+        "revCount": 1,
+        "type": "git",
+        "url": "https://github.com/raffaele-99/workbench"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://github.com/raffaele-99/workbench"
       }
     }
   },
