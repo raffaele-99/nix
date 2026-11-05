@@ -27,6 +27,7 @@
       url = "git+https://github.com/raffaele-99/workbench";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    stacksparrow.url = "github:stacksparrow4/nix";
   };
 
   outputs =
@@ -39,6 +40,7 @@
       pi2,
       sonic-the-hedgehog,
       workbench,
+      stacksparrow,
       ...
     }:
     let
@@ -51,6 +53,9 @@
         config.allowUnfree = true;
         overlays = [ caidoOverlay ];
       };
+      diu = darwinPkgs.writeShellScriptBin "diu" ''
+        exec ${stacksparrow.packages.aarch64-darwin.nvim-unboxed}/bin/nvim "$@"
+      '';
     in
     {
       homeModules.default = ./modules/home;
@@ -60,7 +65,10 @@
           home-manager.darwinModules.home-manager
           ./modules/darwin
         ];
-        home-manager.sharedModules = [ self.homeModules.default ];
+        home-manager.sharedModules = [
+          self.homeModules.default
+          { home.packages = [ diu ]; }
+        ];
         nixpkgs.overlays = [ caidoOverlay ];
       };
 
@@ -99,6 +107,7 @@
       packages.aarch64-darwin.luca = nixpkgs.legacyPackages.aarch64-darwin.callPackage ./modules/pkgs/luca { };
       packages.aarch64-darwin.pi = darwinPkgs.callPackage ./modules/pkgs/pi { nixpkgsRev = nixpkgs.rev; };
       packages.aarch64-darwin.pi2 = pi2.packages.aarch64-darwin.default;
+      packages.aarch64-darwin.diu = diu;
       apps.aarch64-darwin.pi2 = {
         type = "app";
         program = "${self.packages.aarch64-darwin.pi2}/bin/pi2";
