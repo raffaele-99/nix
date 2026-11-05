@@ -11,7 +11,6 @@
     '';
     shellAliases = {
       di = "nix run --extra-experimental-features 'nix-command flakes' github:stacksparrow4/nix#nvim";
-      diu = "nix run --extra-experimental-features 'nix-command flakes' github:stacksparrow4/nix#nvim-unboxed";
     };
   };
 }
