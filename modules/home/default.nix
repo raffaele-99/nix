@@ -5,6 +5,7 @@
     ./docker.nix
     ./editor.nix
     ./glow.nix
+    ./brave.nix
     ./rectangle.nix
     ./luca.nix
   ];
