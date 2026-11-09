@@ -16,7 +16,8 @@ macos pi wrapper to handle sandboxing and stuff
 - image built on first use
 - pi runs on the host with its config, `auth.json` and sessions; none of them enter the container
 - the agent's tools run in the container: bash, read, write, edit, grep, find, ls, and `!` commands
-- cwd mounted read-write at `/workspace`, including `.git`; refuses a cwd that contains `~/.pi/agent`
+- cwd mounted read-write at `/workspace`, including `.git` so the agent can commit; refuses a cwd that contains `~/.pi/agent`
+- `.git/config` and `.git/hooks` are read-only (host git would run them), and `.git` can't be moved or replaced; refuses if any of them is a symlink
 - read-only root, no caps, no-new-privileges
 - the agent can't reach host files: pi's own tools are off (so no tools at all if the sandbox ones fail to load), project `.pi/` files are ignored, and the workspace `AGENTS.md`/`CLAUDE.md` is read through the container
 - skills are mounted read-only at their host paths; other extensions run on the host
