@@ -32,7 +32,7 @@ let
   '';
 in
 {
-  home.packages = [ pkgs.docker-credential-helpers ];
+  home.packages = [ (pkgs.callPackage ../pkgs/docker-credential-osxkeychain { }) ];
 
   home.activation.dockerCredentials = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     run ${configureDocker} ${lib.escapeShellArg config.home.homeDirectory}
