@@ -45,6 +45,18 @@ let
     ];
   };
 
+  extensionEntries = lib.attrNames (
+    lib.filterAttrs (
+      name: type:
+      let
+        entry = ./extensions + (if type == "directory" then "/${name}/index.ts" else "/${name}");
+      in
+      (type == "directory" || lib.hasSuffix ".ts" name)
+      && builtins.pathExists entry
+      && lib.any (lib.hasPrefix "export default") (lib.splitString "\n" (builtins.readFile entry))
+    ) (builtins.readDir ./extensions)
+  );
+
   sandboxGuidelines = writeText "pi-sandbox-guidelines.md" "- You can use `uv` if you need pip packages.";
 
   # The desktop app authenticates the peer connected to s.sock, so a raw socat
@@ -440,10 +452,8 @@ let
         local root="$1" name
         local args=(--system-prompt "$root/SYSTEM.md" --theme "$root/themes")
         if ! $no_extensions; then
-          for name in ${lib.escapeShellArgs (lib.attrNames (builtins.readDir ./extensions))}; do
-            if [[ -e "$root/extensions/$name" ]]; then
-              args+=(-e "$root/extensions/$name")
-            fi
+          for name in ${lib.escapeShellArgs extensionEntries}; do
+            args+=(-e "$root/extensions/$name")
           done
         fi
         pi_args=("''${args[@]}" "''${pi_args[@]}")
@@ -569,8 +579,6 @@ let
       # workspace is the only host directory.
       cp -R ${agentConfig} "$session_dir/packaged"
       chmod -R u+w "$session_dir/packaged"
-      # subagent.ts starts more pi processes, which would have host tools.
-      rm -f "$session_dir/packaged/extensions/subagent.ts"
 
       add_sandbox_guidelines() {
         local system_prompt="$session_dir/packaged/SYSTEM.md"

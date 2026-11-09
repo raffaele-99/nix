@@ -53,7 +53,11 @@ class WorkerThread implements ThreadViewSource {
 	}
 	streamingMessage() { return this.session?.state.streamingMessage; }
 	pendingToolCalls() { return this.session?.state.pendingToolCalls ?? new Set<string>(); }
-	resolveToolRenderer(name: string) { return this.session?.extensionRunner.resolveToolRenderers(name, () => undefined); }
+	isRunning() { return this.session?.isStreaming ?? false; }
+	resolveToolRenderer(name: string) {
+		const session = this.session;
+		return session?.extensionRunner.resolveToolRenderers(name, () => session.getToolDefinition(name));
+	}
 	get model(): string { return this.session?.model?.id ?? this.record.settings?.model ?? ""; }
 	subscribe(listener: (event: ThreadViewEvent) => void): () => void {
 		this.listeners.add(listener);

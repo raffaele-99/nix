@@ -21,7 +21,8 @@ export class SideView extends ThreadView {
 			},
 			streamingMessage: () => session.state.streamingMessage,
 			pendingToolCalls: () => session.state.pendingToolCalls,
-			resolveToolRenderer: (name) => session.extensionRunner.resolveToolRenderers(name, () => undefined),
+			isRunning: () => session.isStreaming,
+			resolveToolRenderer: (name) => session.extensionRunner.resolveToolRenderers(name, () => session.getToolDefinition(name)),
 			subscribe: (listener) => session.subscribe(listener),
 		}, {
 			...actions,
