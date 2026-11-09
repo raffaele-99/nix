@@ -57,6 +57,5 @@ in
       docker-compose
       docker-credential-helpers
     ]
-    ++ lib.optional hmPrograms.brave.enable brave
     ++ lib.optional hmPrograms.rectangle.enable rectangle;
 }
