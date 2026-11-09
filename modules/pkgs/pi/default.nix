@@ -598,6 +598,32 @@ let
         --mount "type=bind,src=$workspace,dst=/workspace"
       )
 
+      # Agents commit, but git on the host runs what .git's config and hooks
+      # say, so those are read-only. .git is a mount point of its own so it
+      # can't be moved aside and replaced; a linked worktree's .git file is
+      # read-only.
+      protect_git() {
+        local git_dir="$workspace/.git" name
+        for name in "" /config /hooks; do
+          if [[ -L "$git_dir$name" ]]; then
+            echo "pi: refusing to mount $workspace in the sandbox: $git_dir$name is a symlink and can't be made read-only; use --no-sandbox to run tools on the host" >&2
+            exit 2
+          fi
+        done
+        if [[ -f "$git_dir" ]]; then
+          docker_args+=(--mount "type=bind,src=$git_dir,dst=/workspace/.git,readonly")
+        elif [[ -d "$git_dir" ]]; then
+          mkdir -p "$git_dir/hooks"
+          [[ -e "$git_dir/config" ]] || : > "$git_dir/config"
+          docker_args+=(
+            --mount "type=bind,src=$git_dir,dst=/workspace/.git"
+            --mount "type=bind,src=$git_dir/config,dst=/workspace/.git/config,readonly"
+            --mount "type=bind,src=$git_dir/hooks,dst=/workspace/.git/hooks,readonly"
+          )
+        fi
+      }
+      protect_git
+
       # pi lists skills by their host paths, so the agent reads read-only copies there.
       mount_skills() {
         local skills="$1" copy="$session_dir/$2"
