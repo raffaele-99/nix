@@ -8,7 +8,9 @@
  *   1. model    fuzzy search over tool-capable OpenRouter models
  *   2. quant    Tab cycles a quantization filter over the endpoint list
  *   3. provider pick one endpoint, or the first row to allow every endpoint
- *               that matches the filter
+ *               that matches the filter. Each row shows the throughput
+ *               OpenRouter advertises on the model page (median output
+ *               tokens/s over the last 30 minutes).
  *
  * Pins are sent through pi's compat.openRouterRouting (the same field a
  * models.json modelOverride sets) using OpenRouter's full endpoint slug, such
@@ -70,6 +72,9 @@ type OpenRouterModel = {
 	supported_parameters?: string[];
 };
 
+/** The authenticated endpoints API reports percentiles; the anonymous one reports null. */
+type Percentiles = { p50?: number | null };
+
 type OpenRouterEndpoint = {
 	provider_name: string;
 	tag: string;
@@ -79,6 +84,15 @@ type OpenRouterEndpoint = {
 	supported_parameters?: string[];
 	status: number;
 	uptime_last_30m: number | null;
+	throughput_last_30m?: number | Percentiles | null;
+};
+
+/** Data scraped from the public model page, keyed by endpoint tag. */
+type ModelPageData = {
+	/** fp8+, no training or retention, cheapest first. */
+	cleanTags: string[];
+	/** Median output tokens per second over the last 30 minutes. */
+	throughput: Map<string, number>;
 };
 
 /** A session pin. `routing` undefined means OpenRouter's default routing. */
@@ -261,13 +275,38 @@ function rankCleanEndpoints(endpoints: ScrapedEndpoint[]): string[] {
 	return ranked.sort((a, b) => a.cost - b.cost).map((row) => row.tag);
 }
 
-async function fetchCleanEndpoints(model: string, signal: AbortSignal): Promise<string[]> {
+function finiteNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** The page's per-endpoint stats carry p50_throughput; the variantGroups fallback has no stats. */
+function scrapedThroughput(endpoints: ScrapedEndpoint[]): Map<string, number> {
+	const throughput = new Map<string, number>();
+	for (const endpoint of endpoints) {
+		const tag = endpoint.provider_slug;
+		const value = finiteNumber(isRecord(endpoint.stats) ? endpoint.stats.p50_throughput : undefined);
+		if (typeof tag === "string" && value !== undefined && !throughput.has(tag)) throughput.set(tag, value);
+	}
+	return throughput;
+}
+
+function apiThroughput(endpoint: OpenRouterEndpoint): number | undefined {
+	const value = endpoint.throughput_last_30m;
+	return finiteNumber(isRecord(value) ? value.p50 : value);
+}
+
+function formatThroughput(tokensPerSecond: number | undefined): string {
+	return tokensPerSecond === undefined ? "? tok/s" : `${Math.round(tokensPerSecond)} tok/s`;
+}
+
+async function fetchModelPage(model: string, signal: AbortSignal): Promise<ModelPageData> {
 	const response = await fetch(`${MODEL_PAGE}${modelPath(model)}`, {
 		headers: { "user-agent": USER_AGENT },
 		signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
 	});
 	if (!response.ok) throw new Error(`OpenRouter model page returned HTTP ${response.status}`);
-	return rankCleanEndpoints(extractEndpoints(await response.text(), model));
+	const endpoints = extractEndpoints(await response.text(), model);
+	return { cleanTags: rankCleanEndpoints(endpoints), throughput: scrapedThroughput(endpoints) };
 }
 
 function getRouting(model: Model<Api> | undefined): OpenRouterRouting | undefined {
@@ -548,7 +587,7 @@ export default function (pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		model: OpenRouterModel,
 		endpoints: OpenRouterEndpoint[],
-		cleanTags: string[],
+		{ cleanTags, throughput }: ModelPageData,
 	) => {
 		const isCurrentModel = ctx.model?.provider === PROVIDER && ctx.model.id === model.id;
 		const currentRouting = isCurrentModel ? getRouting(ctx.model) : undefined;
@@ -575,6 +614,7 @@ export default function (pi: ExtensionAPI) {
 			quantOf(endpoint),
 			formatPrice(endpoint.pricing),
 			formatTokens(endpoint.context_length),
+			formatThroughput(throughput.get(endpoint.tag) ?? apiThroughput(endpoint)),
 			endpoint.uptime_last_30m === null ? "up ?" : `up ${Math.floor(endpoint.uptime_last_30m)}%`,
 		];
 		const bestEndpoint = cleanTags
@@ -630,7 +670,8 @@ export default function (pi: ExtensionAPI) {
 
 		return pick(ctx, {
 			title: `${model.id} providers`,
-			subtitle: "endpoint · quant · $ per 1M input/output/cache read · context · uptime (30m) · green: fp8+, no training or retention",
+			subtitle:
+				"endpoint · quant · $ per 1M input/output/cache read · context · median throughput (30m) · uptime (30m) · green: fp8+, no training or retention",
 			filters: [ALL_QUANTS, ...quants],
 			items,
 			hint: "type to search · ↑↓ move · tab quant · enter pin · esc back",
@@ -693,23 +734,23 @@ export default function (pi: ExtensionAPI) {
 							`/models/${modelPath(picked.id)}/endpoints`,
 							signal,
 						),
-						fetchCleanEndpoints(picked.id, signal).catch((error: unknown) => {
+						fetchModelPage(picked.id, signal).catch((error: unknown): ModelPageData => {
 							if (!isAbortError(error)) {
 								const message = error instanceof Error ? error.message : String(error);
-								ctx.ui.notify(`OpenRouter best provider: ${message}`, "warning");
+								ctx.ui.notify(`OpenRouter provider stats: ${message}`, "warning");
 							}
-							return [];
+							return { cleanTags: [], throughput: new Map() };
 						}),
 					]),
 				);
-				const [details, cleanTags = []] = loaded ?? [];
+				const [details, page = { cleanTags: [], throughput: new Map<string, number>() }] = loaded ?? [];
 				const endpoints = details?.endpoints ?? [];
 				if (details && endpoints.length === 0) ctx.ui.notify(`${picked.id} has no live endpoints`, "warning");
 				if (endpoints.length === 0) continue;
 
 				// Duplicate tags are separate deployments behind the same slug, so one row covers them.
 				const unique = [...new Map(endpoints.map((endpoint) => [endpoint.tag, endpoint])).values()];
-				const routeChoice = await pickEndpoint(ctx, picked, unique, cleanTags);
+				const routeChoice = await pickEndpoint(ctx, picked, unique, page);
 				if (!routeChoice.value) continue;
 
 				await selectRoute(ctx, picked, routeChoice.value);
