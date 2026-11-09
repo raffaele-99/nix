@@ -343,6 +343,15 @@ function holdsTranscript(container: Container): boolean {
   return container.children.some((child) => isGradientTool(child) || isConversation(child));
 }
 
+type TranscriptState = { toolsExpanded: boolean; running: boolean };
+
+function ownState(container: Container): TranscriptState | undefined {
+  const state = container as Container & Partial<TranscriptState>;
+  return typeof state.toolsExpanded === "boolean" && typeof state.running === "boolean"
+    ? (state as TranscriptState)
+    : undefined;
+}
+
 function messageParts(message: AssistantMessageComponent): Component[] | undefined {
   const { contentContainer } = message as unknown as { contentContainer?: unknown };
   return contentContainer instanceof Container ? contentContainer.children : undefined;
@@ -825,8 +834,9 @@ export default function (pi: ExtensionAPI) {
   let transcriptColumns: Columns = { mark: DEFAULT_OUTPUT_PAD, content: DEFAULT_OUTPUT_PAD + MARK_WIDTH };
   let renderedTranscript: RenderedTranscript | undefined;
   let agentRunning = false;
+  let rendererInstalled = false;
   const currentTheme = () => currentUi()?.theme;
-  const expansion = new GroupExpansion();
+  const expansions = new WeakMap<Container, GroupExpansion>();
   const groupViews = new WeakMap<GradientTool, { header: ToolGroupBlock; body: GroupBody }>();
   const transcriptViews = new WeakMap<Container, Container>();
 
@@ -855,6 +865,7 @@ export default function (pi: ExtensionAPI) {
         return undefined;
       }
     };
+    if (ctx.mode === "tui") installRenderer();
   });
 
   pi.on("agent_start", () => {
@@ -865,7 +876,16 @@ export default function (pi: ExtensionAPI) {
     agentRunning = false;
   });
 
-  const viewsOf = (group: ToolGroup) => {
+  const expansionOf = (container: Container) => {
+    let expansion = expansions.get(container);
+    if (!expansion) {
+      expansion = new GroupExpansion();
+      expansions.set(container, expansion);
+    }
+    return expansion;
+  };
+
+  const viewsOf = (group: ToolGroup, expansion: GroupExpansion) => {
     const key = group.tools[0];
     let views = groupViews.get(key);
     if (!views) {
@@ -875,15 +895,28 @@ export default function (pi: ExtensionAPI) {
     return views;
   };
 
-  const groupSegments = (entry: ShownGroup, theme: Theme, zoned: (item: TranscriptItem) => Component) => {
-    const { header, body } = viewsOf(entry.group);
-    header.show(theme, groupSummary(entry.group, theme), transcriptColumns, isLive(entry.group, agentRunning));
+  const groupSegments = (
+    entry: ShownGroup,
+    theme: Theme,
+    zoned: (item: TranscriptItem) => Component,
+    expansion: GroupExpansion,
+    running: boolean,
+  ) => {
+    const { header, body } = viewsOf(entry.group, expansion);
+    header.show(theme, groupSummary(entry.group, theme), transcriptColumns, isLive(entry.group, running));
     const members = entry.members.map((item) => ({ component: zoned(item), branches: isWork(item) }));
     return entry.expanded ? [header, body.show(theme, members, transcriptColumns.content)] : [header];
   };
 
-  const transcriptSegments = (container: Container, width: number, theme: Theme): Component[] => {
-    expansion.follow(currentUi()?.getToolsExpanded() ?? false);
+  const transcriptSegments = (
+    container: Container,
+    state: TranscriptState | undefined,
+    width: number,
+    theme: Theme,
+  ): Component[] => {
+    const expansion = expansionOf(container);
+    expansion.follow(state?.toolsExpanded ?? currentUi()?.getToolsExpanded() ?? false);
+    const running = state?.running ?? agentRunning;
     const items = container.children.flatMap(itemsOf);
     transcriptColumns = columnsOf(items);
     const groupsByStart = new Map(toolGroups(items, width).map((group) => [group.start, group]));
@@ -901,147 +934,153 @@ export default function (pi: ExtensionAPI) {
     }
     const zoned = responseZones(shown.flatMap((entry) => ("group" in entry ? entry.members : [entry])));
     return shown.flatMap((entry, index) => {
-      if ("group" in entry) return groupSegments(entry, theme, zoned);
+      if ("group" in entry) return groupSegments(entry, theme, zoned, expansion, running);
       return [zoned(entry, leadingMark(entry, shown[index - 1], theme, transcriptColumns))];
     });
   };
 
-  const prototype = ToolExecutionComponent.prototype as unknown as Record<symbol, unknown> & GradientTool;
-  const originalRender = (prototype[ORIGINAL_RENDER] ?? prototype.render) as GradientTool["render"];
-  prototype[ORIGINAL_RENDER] = originalRender;
+  const installRenderer = () => {
+    if (rendererInstalled) return;
+    rendererInstalled = true;
 
-  const originalHandleMouse = (prototype[ORIGINAL_HANDLE_MOUSE] ?? prototype.handleMouse) as GradientTool["handleMouse"];
-  prototype[ORIGINAL_HANDLE_MOUSE] = originalHandleMouse;
+    const prototype = ToolExecutionComponent.prototype as unknown as Record<symbol, unknown> & GradientTool;
+    const originalRender = (prototype[ORIGINAL_RENDER] ?? prototype.render) as GradientTool["render"];
+    prototype[ORIGINAL_RENDER] = originalRender;
 
-  prototype.render = function (this: GradientTool, width: number): string[] {
-    const theme = currentTheme();
-    paddedBlocks.delete(this);
-    if (!theme || this.toolDefinition?.renderShell !== "self" || width <= 2 * PADDING_COLUMNS + 1) {
-      return originalRender.call(this, width);
-    }
+    const originalHandleMouse = (prototype[ORIGINAL_HANDLE_MOUSE] ?? prototype.handleMouse) as GradientTool["handleMouse"];
+    prototype[ORIGINAL_HANDLE_MOUSE] = originalHandleMouse;
 
-    const contentWidth = width - 2 * PADDING_COLUMNS;
-    const lines = originalRender.call(this, contentWidth);
-    const hasSpacerLine = lines[0] === "";
-    const contentStart = hasSpacerLine ? 1 : 0;
-    const contentEnd = contentStart + (this.selfRenderHeight ?? lines.length);
-    if (contentEnd === contentStart) return lines;
+    prototype.render = function (this: GradientTool, width: number): string[] {
+      const theme = currentTheme();
+      paddedBlocks.delete(this);
+      if (!theme || this.toolDefinition?.renderShell !== "self" || width <= 2 * PADDING_COLUMNS + 1) {
+        return originalRender.call(this, width);
+      }
 
-    const singleLine = this.expanded ? undefined : callLineWithResult(this, theme, contentWidth);
-    const content = singleLine === undefined ? lines.slice(contentStart, contentEnd) : [singleLine];
-    paddedBlocks.set(this, { top: contentStart, contentHeight: content.length, contentWidth });
+      const contentWidth = width - 2 * PADDING_COLUMNS;
+      const lines = originalRender.call(this, contentWidth);
+      const hasSpacerLine = lines[0] === "";
+      const contentStart = hasSpacerLine ? 1 : 0;
+      const contentEnd = contentStart + (this.selfRenderHeight ?? lines.length);
+      if (contentEnd === contentStart) return lines;
 
-    const ramp = fadingBackgroundPerColumn(theme, statusBackground(this), width);
-    const block = paintBlock(this, content, width, ramp);
-    return [...lines.slice(0, contentStart), ...block, ...lines.slice(contentEnd)];
-  };
+      const singleLine = this.expanded ? undefined : callLineWithResult(this, theme, contentWidth);
+      const content = singleLine === undefined ? lines.slice(contentStart, contentEnd) : [singleLine];
+      paddedBlocks.set(this, { top: contentStart, contentHeight: content.length, contentWidth });
 
-  prototype.handleMouse = function (this: GradientTool, event: TuiMouseEvent) {
-    const block = paddedBlocks.get(this);
-    if (!block) return originalHandleMouse.call(this, event);
-    const row = event.y - block.top;
-    if (row < 0 || row >= block.contentHeight + 2 * PADDING_ROWS) return undefined;
-    return this.selfRenderContainer.handleMouse({
-      ...event,
-      x: clamp(event.x - PADDING_COLUMNS, 0, block.contentWidth - 1),
-      y: clamp(row - PADDING_ROWS, 0, block.contentHeight - 1),
-      width: block.contentWidth,
-      height: block.contentHeight,
-    });
-  };
+      const ramp = fadingBackgroundPerColumn(theme, statusBackground(this), width);
+      const block = paintBlock(this, content, width, ramp);
+      return [...lines.slice(0, contentStart), ...block, ...lines.slice(contentEnd)];
+    };
 
-  const containerPrototype = Container.prototype as unknown as Record<symbol, unknown> & Container;
-  const originalContainerRender = (containerPrototype[ORIGINAL_CONTAINER_RENDER] ??
-    containerPrototype.render) as Container["render"];
-  containerPrototype[ORIGINAL_CONTAINER_RENDER] = originalContainerRender;
+    prototype.handleMouse = function (this: GradientTool, event: TuiMouseEvent) {
+      const block = paddedBlocks.get(this);
+      if (!block) return originalHandleMouse.call(this, event);
+      const row = event.y - block.top;
+      if (row < 0 || row >= block.contentHeight + 2 * PADDING_ROWS) return undefined;
+      return this.selfRenderContainer.handleMouse({
+        ...event,
+        x: clamp(event.x - PADDING_COLUMNS, 0, block.contentWidth - 1),
+        y: clamp(row - PADDING_ROWS, 0, block.contentHeight - 1),
+        width: block.contentWidth,
+        height: block.contentHeight,
+      });
+    };
 
-  const originalContainerHandleMouse = (containerPrototype[ORIGINAL_CONTAINER_HANDLE_MOUSE] ??
-    containerPrototype.handleMouse) as Container["handleMouse"];
-  containerPrototype[ORIGINAL_CONTAINER_HANDLE_MOUSE] = originalContainerHandleMouse;
+    const containerPrototype = Container.prototype as unknown as Record<symbol, unknown> & Container;
+    const originalContainerRender = (containerPrototype[ORIGINAL_CONTAINER_RENDER] ??
+      containerPrototype.render) as Container["render"];
+    containerPrototype[ORIGINAL_CONTAINER_RENDER] = originalContainerRender;
 
-  containerPrototype.render = function (this: Container, width: number): string[] {
-    const theme = holdsTranscript(this) ? currentTheme() : undefined;
-    if (!theme) {
-      transcriptViews.delete(this);
-      return originalContainerRender.call(this, width);
-    }
+    const originalContainerHandleMouse = (containerPrototype[ORIGINAL_CONTAINER_HANDLE_MOUSE] ??
+      containerPrototype.handleMouse) as Container["handleMouse"];
+    containerPrototype[ORIGINAL_CONTAINER_HANDLE_MOUSE] = originalContainerHandleMouse;
 
-    const view = transcriptViews.get(this) ?? new Container();
-    transcriptViews.set(this, view);
-    view.children = transcriptSegments(this, width, theme);
-    const lines = originalContainerRender.call(view, width);
-    renderedTranscript = { view, width, lines };
-    return lines;
-  };
+    containerPrototype.render = function (this: Container, width: number): string[] {
+      const theme = holdsTranscript(this) ? currentTheme() : undefined;
+      if (!theme) {
+        transcriptViews.delete(this);
+        return originalContainerRender.call(this, width);
+      }
 
-  const keepClickedLineOnScreen = (event: TuiMouseEvent, growth: number) => {
-    const viewport = transcriptViewport;
-    if (!viewport?.scrollView.isFollowingEnd) return;
-    const { scrollView, contentHeight } = viewport;
-    const followingScrollTop = Math.max(0, contentHeight + growth - scrollView.viewportHeight);
-    const clickedRowAfterFollowing = event.screenY - (followingScrollTop - scrollView.scrollTop);
-    if (clickedRowAfterFollowing < 0) scrollView.scrollTo(scrollView.scrollTop, { disableFollow: true });
-  };
+      const view = transcriptViews.get(this) ?? new Container();
+      transcriptViews.set(this, view);
+      const state = ownState(this);
+      view.children = transcriptSegments(this, state, width, theme);
+      const lines = originalContainerRender.call(view, width);
+      if (!state) renderedTranscript = { view, width, lines };
+      return lines;
+    };
 
-  containerPrototype.handleMouse = function (this: Container, event: TuiMouseEvent) {
-    const view = transcriptViews.get(this);
-    if (!view || event.type !== "click") return originalContainerHandleMouse.call(view ?? this, event);
-    const heightBefore = this.render(event.width).length;
-    const result = originalContainerHandleMouse.call(transcriptViews.get(this) ?? this, event);
-    if (result) keepClickedLineOnScreen(event, this.render(event.width).length - heightBefore);
-    return result;
-  };
+    const keepClickedLineOnScreen = (event: TuiMouseEvent, growth: number) => {
+      const viewport = transcriptViewport;
+      if (!viewport?.scrollView.isFollowingEnd) return;
+      const { scrollView, contentHeight } = viewport;
+      const followingScrollTop = Math.max(0, contentHeight + growth - scrollView.viewportHeight);
+      const clickedRowAfterFollowing = event.screenY - (followingScrollTop - scrollView.scrollTop);
+      if (clickedRowAfterFollowing < 0) scrollView.scrollTo(scrollView.scrollTop, { disableFollow: true });
+    };
 
-  const scrollViewPrototype = ScrollView.prototype as unknown as Record<symbol, unknown> & ScrollView;
-  const originalUpdateLayout = (scrollViewPrototype[ORIGINAL_UPDATE_LAYOUT] ??
-    scrollViewPrototype.updateLayout) as ScrollView["updateLayout"];
-  scrollViewPrototype[ORIGINAL_UPDATE_LAYOUT] = originalUpdateLayout;
+    containerPrototype.handleMouse = function (this: Container, event: TuiMouseEvent) {
+      const view = transcriptViews.get(this);
+      if (!view || event.type !== "click") return originalContainerHandleMouse.call(view ?? this, event);
+      const heightBefore = this.render(event.width).length;
+      const result = originalContainerHandleMouse.call(transcriptViews.get(this) ?? this, event);
+      if (result && !ownState(this)) keepClickedLineOnScreen(event, this.render(event.width).length - heightBefore);
+      return result;
+    };
 
-  scrollViewPrototype.updateLayout = function (
-    this: ScrollView,
-    contentHeight: number,
-    viewportHeight: number,
-    requestRender: () => void,
-  ) {
-    if (this.primary) transcriptViewport = { scrollView: this, contentHeight };
-    originalUpdateLayout.call(this, contentHeight, viewportHeight, requestRender);
-  };
+    const scrollViewPrototype = ScrollView.prototype as unknown as Record<symbol, unknown> & ScrollView;
+    const originalUpdateLayout = (scrollViewPrototype[ORIGINAL_UPDATE_LAYOUT] ??
+      scrollViewPrototype.updateLayout) as ScrollView["updateLayout"];
+    scrollViewPrototype[ORIGINAL_UPDATE_LAYOUT] = originalUpdateLayout;
 
-  const altScreen = TuiAltScreen.prototype as unknown as AltScreenSelection;
-  const originalApplySelection = (altScreen[ORIGINAL_APPLY_SELECTION] ??
-    altScreen.applySelection) as AltScreenSelection["applySelection"];
-  altScreen[ORIGINAL_APPLY_SELECTION] = originalApplySelection;
+    scrollViewPrototype.updateLayout = function (
+      this: ScrollView,
+      contentHeight: number,
+      viewportHeight: number,
+      requestRender: () => void,
+    ) {
+      if (this.primary) transcriptViewport = { scrollView: this, contentHeight };
+      originalUpdateLayout.call(this, contentHeight, viewportHeight, requestRender);
+    };
 
-  const originalSelectionColumns = (altScreen[ORIGINAL_SELECTION_COLUMNS] ??
-    altScreen.getSelectionColumns) as AltScreenSelection["getSelectionColumns"];
-  altScreen[ORIGINAL_SELECTION_COLUMNS] = originalSelectionColumns;
+    const altScreen = TuiAltScreen.prototype as unknown as AltScreenSelection;
+    const originalApplySelection = (altScreen[ORIGINAL_APPLY_SELECTION] ??
+      altScreen.applySelection) as AltScreenSelection["applySelection"];
+    altScreen[ORIGINAL_APPLY_SELECTION] = originalApplySelection;
 
-  let paintedLayout: LayoutShape | undefined;
+    const originalSelectionColumns = (altScreen[ORIGINAL_SELECTION_COLUMNS] ??
+      altScreen.getSelectionColumns) as AltScreenSelection["getSelectionColumns"];
+    altScreen[ORIGINAL_SELECTION_COLUMNS] = originalSelectionColumns;
 
-  altScreen.applySelection = function (this: AltScreenSelection, screen: string[], layout = this.currentLayout) {
-    paintedLayout = layout;
-    try {
-      return originalApplySelection.call(this, screen, layout);
-    } finally {
-      paintedLayout = undefined;
-    }
-  };
+    let paintedLayout: LayoutShape | undefined;
 
-  altScreen.getSelectionColumns = function (
-    this: AltScreenSelection,
-    line: string,
-    row: number,
-    selection: SelectionBounds,
-    minColumn?: number,
-    maxColumn?: number,
-  ) {
-    const columns = originalSelectionColumns.call(this, line, row, selection, minColumn, maxColumn);
-    if (!paintedLayout) {
-      const content = scrollContentOf(this.currentLayout, selection);
-      return copiedColumns(columns, content ? decorationAt(renderedTranscript, content.lines, row) : 0);
-    }
-    const content = contentAt(paintedLayout, selection, row, line);
-    const decoration = decorationAt(renderedTranscript, content.lines, content.row);
-    return highlightedColumns(columns, textColumns(content.line, decoration), content.offset);
+    altScreen.applySelection = function (this: AltScreenSelection, screen: string[], layout = this.currentLayout) {
+      paintedLayout = layout;
+      try {
+        return originalApplySelection.call(this, screen, layout);
+      } finally {
+        paintedLayout = undefined;
+      }
+    };
+
+    altScreen.getSelectionColumns = function (
+      this: AltScreenSelection,
+      line: string,
+      row: number,
+      selection: SelectionBounds,
+      minColumn?: number,
+      maxColumn?: number,
+    ) {
+      const columns = originalSelectionColumns.call(this, line, row, selection, minColumn, maxColumn);
+      if (!paintedLayout) {
+        const content = scrollContentOf(this.currentLayout, selection);
+        return copiedColumns(columns, content ? decorationAt(renderedTranscript, content.lines, row) : 0);
+      }
+      const content = contentAt(paintedLayout, selection, row, line);
+      const decoration = decorationAt(renderedTranscript, content.lines, content.row);
+      return highlightedColumns(columns, textColumns(content.line, decoration), content.offset);
+    };
   };
 }
