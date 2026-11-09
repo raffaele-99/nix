@@ -55,7 +55,7 @@ in
       colima
       docker
       docker-compose
-      docker-credential-helpers
+      (callPackage ../pkgs/docker-credential-osxkeychain { })
     ]
     ++ lib.optional hmPrograms.rectangle.enable rectangle;
 }
