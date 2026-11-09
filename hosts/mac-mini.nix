@@ -16,7 +16,6 @@
 
   home-manager.users.${config.shared.username} = {
     programs = {
-      brave.enable = false;
       rectangle.enable = false;
 
       luca.settings.host = "mac-mini";
