@@ -4,6 +4,9 @@
   pkgs,
   ...
 }:
+let
+  hmPrograms = config.home-manager.users.${config.shared.username}.programs;
+in
 {
   environment.systemPackages =
     with pkgs;
@@ -44,7 +47,6 @@
       # nasoignw
       _1password-cli
       _1password-gui
-      brave
       ghostty-bin
       grandperspective
 
@@ -55,7 +57,6 @@
       docker-compose
       docker-credential-helpers
     ]
-    ++
-      lib.optional config.home-manager.users.${config.shared.username}.programs.rectangle.enable
-        rectangle;
+    ++ lib.optional hmPrograms.brave.enable brave
+    ++ lib.optional hmPrograms.rectangle.enable rectangle;
 }
