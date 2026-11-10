@@ -7,7 +7,7 @@ import { configureSubagents } from "./subagent-config.ts";
 import type { WorkerResult } from "./worker-history.ts";
 import type { WorkerSessionOptions } from "./worker-session.ts";
 import { WorkerViewer } from "./worker-view.ts";
-import { AGENTS_STATE, AGENT_WORK_TOOLS, agentsEnabled, requireAgents, restrictAgentTools, supportsAgentToolChoice } from "./availability.ts";
+import { AGENTS_STATE, AGENT_WORK_TOOLS, agentsEnabled, requireAgents, restrictAgentTools, supportsAllowedTools } from "./availability.ts";
 import { withoutLegacyAgentNotices } from "../threads/session-history.ts";
 
 const Target = Type.String({ minLength: 1, description: "Worker ID, unique ID prefix, or unique task name" });
@@ -16,7 +16,8 @@ const Message = Type.String({ minLength: 1 });
 export function registerSubagents(pi: ExtensionAPI, getServiceTier: () => ServiceTier | undefined = () => undefined, options: WorkerSessionOptions = {}): void {
 	const agents = new AgentController(pi, getServiceTier, options);
 	const viewer = new WorkerViewer(pi, agents);
-	pi.on("before_provider_request", (event, ctx) => agentsEnabled(ctx) ? event.payload : restrictAgentTools(event.payload, ctx.model?.api));
+	pi.on("before_provider_request", (event, ctx) =>
+		!agentsEnabled(ctx) && supportsAllowedTools(ctx.model) ? restrictAgentTools(event.payload, ctx.model.api) : event.payload);
 	// Discard notices saved by the superseded implementation without rewriting sessions.
 	pi.on("context", (event) => ({ messages: withoutLegacyAgentNotices(event.messages) }));
 	const result = (workers: WorkerResult[], collect = false): AgentToolResult<any> => ({
@@ -39,8 +40,9 @@ export function registerSubagents(pi: ExtensionAPI, getServiceTier: () => Servic
 			},
 			execute: async (_id, args, signal, _update, ctx) => {
 				agents.bind(ctx); signal?.throwIfAborted();
-				// A response already in flight may contain calls from before the toggle.
-				if (AGENT_WORK_TOOLS.has(name)) requireAgents(ctx);
+				// A response already in flight may contain calls from before the toggle, and
+				// providers without allowed_tools still offer these tools while disabled.
+				if (AGENT_WORK_TOOLS.has(name) && !agentsEnabled(ctx)) throw new Error("Subagents are currently disabled; do this work directly with your other tools.");
 				return run(args, signal, ctx);
 			},
 		});
@@ -91,7 +93,6 @@ export function registerSubagents(pi: ExtensionAPI, getServiceTier: () => Servic
 			try {
 				if (command === "toggle" && !id) {
 					const enabled = !agentsEnabled(ctx);
-					if (enabled && ctx.model && !supportsAgentToolChoice(ctx.model.api)) throw new Error("Subagent toggling requires an OpenAI Responses or Chat Completions API.");
 					pi.appendEntry(AGENTS_STATE, { enabled });
 					ctx.ui.notify(`Subagents ${enabled ? "enabled" : "disabled"}.${enabled ? "" : " Existing workers continue; /agents cancel stops them."}`, "info");
 					return;
@@ -109,7 +110,7 @@ export function registerSubagents(pi: ExtensionAPI, getServiceTier: () => Servic
 				}
 				else if (command) { ctx.ui.notify("Usage: /agents [toggle|view [id/name]|config|cancel [id]|resume <id> [message]|close <id>]", "warning"); return; }
 				const workers = agents.list();
-				ctx.ui.notify(`Subagents ${agentsEnabled(ctx) && supportsAgentToolChoice(ctx.model?.api) ? "enabled" : "disabled"}. /agents toggle to change.\n${workers.length ? `${workerSummary(workers)}\n/agents view [id/name] to view a thread.` : "No subagents have run in this session."}`, "info");
+				ctx.ui.notify(`Subagents ${agentsEnabled(ctx) ? "enabled" : "disabled"}. /agents toggle to change.\n${workers.length ? `${workerSummary(workers)}\n/agents view [id/name] to view a thread.` : "No subagents have run in this session."}`, "info");
 			} catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
 		},
 	});

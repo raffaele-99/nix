@@ -13,13 +13,15 @@ export function agentsEnabled(ctx: ExtensionContext): boolean {
 	return false;
 }
 
-export function supportsAgentToolChoice(api: string | undefined): boolean {
-	return api === "openai-responses" || api === "openai-codex-responses" || api === "openai-completions";
+export function requireAgents(ctx: ExtensionContext): void {
+	if (!agentsEnabled(ctx)) throw new Error("Subagents are disabled. Use /agents toggle to enable them.");
 }
 
-export function requireAgents(ctx: ExtensionContext): void {
-	if (ctx.model && !supportsAgentToolChoice(ctx.model.api)) throw new Error("Subagent toggling requires an OpenAI Responses or Chat Completions API.");
-	if (!agentsEnabled(ctx)) throw new Error("Subagents are disabled. Use /agents toggle to enable them.");
+// Only OpenAI's own API implements allowed_tools. OpenRouter's upstreams reject it, and
+// OpenRouter's Responses API emulates it by dropping tools, which invalidates the prompt
+// cache. Elsewhere the agent tools stay declared and the tool guard refuses them.
+export function supportsAllowedTools(model: ExtensionContext["model"]): model is NonNullable<ExtensionContext["model"]> {
+	return model?.provider === "openai" && (model.api === "openai-responses" || model.api === "openai-completions");
 }
 
 type WireItem = Record<string, any>;
@@ -27,8 +29,8 @@ const nameOf = (tool: WireItem): string | undefined => tool.name ?? tool.functio
 
 // https://developers.openai.com/api/docs/guides/function-calling#tool-choice
 // Keep declarations and conversation history unchanged; constrain the next response.
-export function restrictAgentTools(payload: unknown, api: string | undefined): unknown {
-	if (!supportsAgentToolChoice(api) || !payload || typeof payload !== "object") return payload;
+export function restrictAgentTools(payload: unknown, api: string): unknown {
+	if (!payload || typeof payload !== "object") return payload;
 	const body = payload as WireItem;
 	const choice = body.tool_choice;
 	if (choice === "none") return body;
