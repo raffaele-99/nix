@@ -26,6 +26,16 @@ in
       default = true;
       description = "Install and configure Colima, Docker, Compose, and credential helpers.";
     };
+    colima.cpus = lib.mkOption {
+      type = lib.types.nullOr lib.types.ints.positive;
+      default = null;
+      description = "Number of CPUs for the Colima VM; null uses Colima's default.";
+    };
+    colima.memory = lib.mkOption {
+      type = lib.types.nullOr lib.types.ints.positive;
+      default = null;
+      description = "Memory in GiB for the Colima VM; null uses Colima's default.";
+    };
   };
 
   config = {
@@ -69,6 +79,14 @@ in
           "${pkgs.colima}/bin/colima"
           "start"
           "--foreground"
+        ]
+        ++ lib.optionals (cfg.colima.cpus != null) [
+          "--cpus"
+          (toString cfg.colima.cpus)
+        ]
+        ++ lib.optionals (cfg.colima.memory != null) [
+          "--memory"
+          (toString cfg.colima.memory)
         ];
         RunAtLoad = true;
         KeepAlive.SuccessfulExit = true;
