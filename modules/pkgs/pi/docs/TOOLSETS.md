@@ -1,42 +1,39 @@
 # TOOLSETS
 
-Toolsets let you pull extra Linux packages into a sandbox session on demand without rebuilding the base `luca/pi-sandbox` image.
+Sometimes you will want your `pi` agent to do something non-standard and you know which packages it will need to do it. For example, reverse engineering a binary is pretty much always gonna use the same packages.
 
-Pass one or more with `--tools`:
+Rather than shoving every possible tool I could want into the one sandbox image I have slopped together a "toolset" functionality. Toolsets are opt-in bundles of Linux packages that get mounted into a sandbox session only when you ask for them.
+
+For example the below command will create the default container, but with some reverse engineering packages available too:
 
 ```
 pi --tools re
 ```
 
-The flag is repeatable if you want multiple toolsets in the same session. Toolsets only work in sandbox mode (passing `--tools` with `--no-sandbox` will error).
+> [!WARNING]
+> In case it isn't obvious this only works with sandboxing enabled. If you pass `--no-sandbox` the agent just uses whatever is on your host.
+
+## How it works
+
+When you pass `--tools`, `sandbox/prepare-tools.sh` builds the requested toolset inside a temporary `nixos/nix` container using the persistent `luca-pi-sandbox-nix` Docker volume.
+
+Everything the toolset needs from that Linux Nix store is then bind-mounted read-only into your sandbox container and added to `PATH`, leaving the base `luca/pi-sandbox` image untouched.
+
+Builds are pinned in the volume so future sessions with the same toolset and nixpkgs revision reuse the cached build instead of rebuilding from scratch.
 
 ## Available
 
 ### `re`
 
-Reverse engineering tools:
+Reverse engineering tools: `ghidra` (headless via `ghidra-analyzeHeadless`), `jadx`, `radare2`, and `ipsw`.
 
-- `ghidra` (headless via `ghidra-analyzeHeadless`)
-- `jadx`
-- `radare2`
-- `ipsw`
+This is also exported on the flake as `packages.aarch64-linux.re-tools`.
 
-This is also exported directly from the flake as `packages.aarch64-linux.re-tools`.
+## Adding one
 
-## How it works
+Use `toolsets/re/default.nix` as a reference. A toolset is a directory under `toolsets/<name>/` whose `default.nix` takes `nixpkgsRev` and returns an `aarch64-linux` package with a `bin/` directory. Keep any supporting files inside that directory, and stick to letters, numbers, `-`, and `_` for the name.
 
-When you pass `--tools`, the wrapper runs `sandbox/prepare-tools.sh` inside a temporary `nixos/nix` container against the persistent `luca-pi-sandbox-nix` volume.
-
-Each requested toolset is built in that Linux Nix store and pinned with a GC root under `/nix/var/nix/gcroots/pi-sandbox-tools/`. The script outputs a manifest of the full Nix store closure and `bin/` paths, which the wrapper bind-mounts read-only into the sandbox container and prepends to `PATH`.
-
-Because the Nix store lives in the persistent volume, subsequent runs with the same toolset and `nixpkgsRev` reuse the cached build instead of rebuilding.
-
-## Adding a toolset
-
-1. Create `toolsets/NAME/default.nix`. The name must match `[a-zA-Z0-9][a-zA-Z0-9_-]*`, and any supporting files should live inside `toolsets/NAME/`.
-2. The expression should accept `nixpkgsRev` and return an `aarch64-linux` derivation with a `bin/` directory (see `toolsets/re/default.nix` for an example).
-3. Register it in `toolsets/default.nix`.
-4. Track the new files with git so Nix flakes can see them, then rebuild:
+Once it's written, register it in `toolsets/default.nix`, track it with git so the flake can see it, and rebuild:
 
 ```
 git add -N modules/pkgs/pi/toolsets/NAME
@@ -44,12 +41,12 @@ luca build
 ```
 
 > [!NOTE]
-> Toolset definitions are copied into the Nix store at build time, so run `luca build` after any change to a toolset.
+> Toolset definitions are copied in at build time, so you need to run `luca build` after making changes to one.
 
-If you want host-specific toolsets without registering them globally, override the package's `sandboxToolsets` argument.
+If you want a toolset on only one machine instead of registering it globally, override the package's `sandboxToolsets` argument.
 
 ## Files
 
-- `toolsets/default.nix`: registry mapping toolset names to their directories
-- `toolsets/re/default.nix`: reverse engineering toolset definition
-- `sandbox/prepare-tools.sh`: builds requested toolsets in the Linux Nix volume and outputs the mount manifest
+- `toolsets/default.nix`: maps toolset names to their directories
+- `toolsets/re/default.nix`: reverse engineering toolset
+- `sandbox/prepare-tools.sh`: builds requested toolsets in the Linux Nix volume and prints the paths to mount
