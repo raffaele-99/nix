@@ -23,7 +23,7 @@ assert lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (
 );
 let
   imageRevision = builtins.substring 0 12 (
-    builtins.hashString "sha256" "${nixpkgsRev}:${builtins.readFile ./image.nix}"
+    builtins.hashString "sha256" "${nixpkgsRev}:${builtins.readFile ./sandbox/image.nix}"
   );
   imageName = "luca/pi-sandbox";
   imageTag = "${pi-coding-agent.version}-${imageRevision}";
@@ -39,7 +39,7 @@ let
   agentConfig = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
-      ./SYSTEM.md
+      ./prompts/SYSTEM.md
       ./extensions
       ./themes
     ];
@@ -450,7 +450,7 @@ let
       # Prepends the packaged configuration, located at $1 as pi sees it.
       add_agent_config() {
         local root="$1" name
-        local args=(--system-prompt "$root/SYSTEM.md" --theme "$root/themes")
+        local args=(--system-prompt "$root/prompts/SYSTEM.md" --theme "$root/themes")
         if ! $no_extensions; then
           for name in ${lib.escapeShellArgs extensionEntries}; do
             args+=(-e "$root/extensions/$name")
@@ -482,7 +482,7 @@ let
         export CURL_CA_BUNDLE="$caido_bundle"
         export GIT_SSL_CAINFO="$caido_bundle"
         export REQUESTS_CA_BUNDLE="$caido_bundle"
-        pi_args=(-e ${./caido-openrouter.ts} "''${pi_args[@]}")
+        pi_args=(-e ${./extensions/optional/caido-openrouter.ts} "''${pi_args[@]}")
       }
 
       if $info || ! $sandbox; then
@@ -495,7 +495,7 @@ let
           route_pi_through_caido
         fi
         if $no_cwd; then
-          pi_args=(-e ${./no-cwd.ts} "''${pi_args[@]}")
+          pi_args=(-e ${./extensions/optional/no-cwd.ts} "''${pi_args[@]}")
         fi
         exec ${pi-coding-agent}/bin/pi "''${pi_args[@]}"
       fi
@@ -581,7 +581,7 @@ let
       chmod -R u+w "$session_dir/packaged"
 
       add_sandbox_guidelines() {
-        local system_prompt="$session_dir/packaged/SYSTEM.md"
+        local system_prompt="$session_dir/packaged/prompts/SYSTEM.md"
         [[ -f "$system_prompt" ]] || return 0
         ${gawk}/bin/awk -v guidelines="$(cat ${sandboxGuidelines})" \
           '/<\/guidelines>/ { print guidelines } { print }' "$system_prompt" > "$system_prompt.new"
@@ -591,7 +591,7 @@ let
       add_agent_config "$session_dir/packaged"
 
       if $no_cwd; then
-        pi_args=(-e ${./no-cwd.ts} "''${pi_args[@]}")
+        pi_args=(-e ${./extensions/optional/no-cwd.ts} "''${pi_args[@]}")
       fi
 
       docker_args=(
@@ -717,7 +717,7 @@ let
       if ! docker image inspect ${lib.escapeShellArg imageRef} >/dev/null 2>&1; then
         echo ":: building ${imageRef} with Docker's Linux VM" >&2
         image_expression="$state_root/image.nix"
-        install -m 0444 ${./image.nix} "$image_expression"
+        install -m 0444 ${./sandbox/image.nix} "$image_expression"
         docker run --rm --platform linux/arm64 \
           --mount "type=bind,src=$image_expression,dst=/src/image.nix,readonly" \
           --mount "type=volume,src=luca-pi-sandbox-nix,dst=/nix" \
@@ -734,7 +734,7 @@ let
       if (( ''${#toolsets[@]} > 0 )); then
         toolsets_dir="$session_dir/toolsets"
         mkdir -p "$toolsets_dir"
-        install -m 0444 ${./prepare-tools.sh} "$toolsets_dir/prepare-tools.sh"
+        install -m 0444 ${./sandbox/prepare-tools.sh} "$toolsets_dir/prepare-tools.sh"
         for toolset in "''${toolsets[@]}"; do
           [[ ! -e "$toolsets_dir/$toolset" ]] || continue
           case "$toolset" in
@@ -806,7 +806,7 @@ let
       PI_SANDBOX_CONTAINER="$container" ${pi-coding-agent}/bin/pi \
         --no-builtin-tools --no-approve --no-context-files \
         --session-dir "$host_session_dir" \
-        -e ${./sandbox-tools.ts} \
+        -e ${./sandbox/sandbox-tools.ts} \
         "''${pi_args[@]}"
     '';
   };
@@ -828,6 +828,6 @@ symlinkJoin {
   };
   passthru = {
     inherit imageRef opBridgeServer;
-    imageExpression = ./image.nix;
+    imageExpression = ./sandbox/image.nix;
   };
 }
